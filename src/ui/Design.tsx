@@ -27,7 +27,7 @@ const T = {
     ],
     open: 'Assumed, still to confirm',
     questions: [
-      'Settlement risk is counted on the value date only.',
+      'Settlement risk is counted on the value date only. This is the common convention, though supervisors say it can understate.',
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
       'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
@@ -58,7 +58,7 @@ const T = {
     ],
     open: '假設，仍待確認',
     questions: [
-      '結算風險只計交割日當天。',
+      '結算風險只計交割日當天。這是行業慣例，但監管認為會低估。',
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
       'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',

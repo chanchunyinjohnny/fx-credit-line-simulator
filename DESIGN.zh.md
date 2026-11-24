@@ -176,7 +176,7 @@
 | 假設 | 狀態 |
 |---|---|
 | 敞口是我方在交割日應收的金額 | 已核實（巴塞爾 2013 年指引；美聯儲手冊） |
-| 只計在交割日當天 | 簡化：即「日曆日」方法。巴塞爾指出這可能低估，敞口實際由付款不能撤回起，至確認收款為止 |
+| 只計在交割日當天 | 行業慣例。2006 年 CPSS 調查中 52% 的機構這樣計；場地和系統商也這樣定義每日結算額度。監管的最佳做法是由付款不能撤回計到確認收款（巴塞爾 2013、金管局 TA-2）；調查中這段時間平均 26 小時，所以只計一天通常會低估。可行的折衷：收款要翌日才能確認的貨幣，在交割日的下一個營業日也計一次 |
 | 按即期折成美元，不折現；只計本金 | 假設：公開來源沒有規定折算方法 |
 | 經 CLS 同步交收的對沖沒有結算風險 | 已核實（巴塞爾 2013 年指引） |
 | CNH 和 TWD 不是 CLS 的合資格貨幣 | 已核實（CLS，共 18 種貨幣） |
@@ -220,7 +220,7 @@
 
 ## 假設，仍待確認
 
-1. 結算風險只計交割日當天。
+1. 結算風險只計交割日當天。這是行業慣例，但監管認為會低估。
 2. 附加因子按剩餘期限分檔，各產品相同。
 3. 市值為負時，附加金額不減少。
 4. LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。數值要向 360T 和 Bloomberg 查證。
@@ -239,6 +239,9 @@
 - 香港財資市場公會，Code of Conduct and Practice。https://www.tma.org.hk/PubFile/TMACode.pdf
 - OpenGamma，Interest Rate Instruments and Market Conventions Guide（二手來源）。https://quant.opengamma.io/Interest-Rate-Instruments-and-Market-Conventions.pdf
 - CME Group，EBS Value Date Calendar（二手來源）。https://www.cmegroup.com/content/dam/cmegroup/documents/ebs_value-date-calendar.pdf
+- 國際結算銀行支付及結算系統委員會（CPSS），Progress in reducing foreign exchange settlement risk，2008 年 5 月。https://www.bis.org/cpmi/publ/d83.htm
+- 香港金融管理局，監管政策手冊 TA-2「外匯風險管理」，2022 年 1 月。https://brdr.hkma.gov.hk/eng/doc-ldg/docId/getPdf/20220118-2-EN/TA-2.pdf
+- 歐洲央行銀行監管，Sound practices for managing FX settlement risk，2023 年 5 月。https://www.bankingsupervision.europa.eu/press/supervisory-newsletters/newsletter/2023/html/ssm.nl230517_2.en.html
 - 360T MTF Rulebook v4.0，2025 年 11 月。https://www.360t.com/wp-content/uploads/2025/11/360T-MTF-Rulebook-v4.0-12-November-2025-1.pdf
 - Bloomberg BMTF Rulebook，2026 年 4 月。https://assets.bbhub.io/professional/sites/27/BMTF-Rulebook-Effective-17-APR-26.pdf
 - Cboe FX，Market Maker Standards。https://cdn.cboe.com/resources/fx/market-maker-standards.pdf
