@@ -5,7 +5,7 @@ import { defaultState } from '../src/engine/defaults';
 import { board, checkTrade } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
 import { makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
-import { rollSummary } from '../src/engine/roll';
+import { nextPillarStep, rollSummary } from '../src/engine/roll';
 import { buildTrade, reducer } from '../src/engine/state';
 import type { AppState, PairId, Tenor, Ticket, Trade } from '../src/engine/types';
 
@@ -219,6 +219,31 @@ describe('check, reserve, fill', () => {
     expect(sum.groups[0].srReleased).toBeCloseTo(15 * M, 6); // the near-leg receivable has settled
     expect(sum.groups[0].psrAfter).toBeGreaterThan(0);
     expect(rollSummary(reducer(defaultState(), { type: 'SEND', ticket: first }), defaultState()).lapsed).toBe(1);
+  });
+
+  it('jumps to a later date, where the hedge has dropped into a shorter pillar', () => {
+    let s = reducer(defaultState(), { type: 'SEND', ticket: first }); // EUR 20m, 3M, far leg 2 Mar 2027
+    s = reducer(s, { type: 'FILL', id: 'H1' });
+    expect(nextPillarStep(s)).toMatchObject({ id: 'H1', from: '3M', to: '1M' });
+
+    // Day by day nothing visible happens: same pillar, same add-on, prices unchanged.
+    const aWeekOn = reducer(s, { type: 'GO_TO', date: '2026-12-07' });
+    expect(PILLARS[valueTrade(makeCtx(aWeekOn), aWeekOn.trades[0]).pillar]).toBe('3M');
+
+    const step = nextPillarStep(s)!;
+    const later = reducer(s, { type: 'GO_TO', date: step.date });
+    const r = valueTrade(makeCtx(later), later.trades[0]);
+    expect(PILLARS[r.pillar]).toBe('1M');
+    expect(r.addOnPct).toBe(1); // was 2% in the 3M pillar
+    expect(board(makeCtx(later), later, 'E').psr[3].used).toBe(0); // the 3M line is free again
+  });
+
+  it('only moves forward, and lands on a weekday', () => {
+    const s = defaultState();
+    expect(reducer(s, { type: 'GO_TO', date: '2026-12-05' }).businessDate).toBe('2026-12-07'); // Saturday -> Monday
+    expect(reducer(s, { type: 'GO_TO', date: '2026-11-27' })).toBe(s);
+    expect(reducer(s, { type: 'GO_TO', date: '2031-01-01' })).toBe(s);
+    expect(reducer(s, { type: 'GO_TO', date: 'tomorrow' })).toBe(s);
   });
 
   it('refuses tickets outside the flow', () => {

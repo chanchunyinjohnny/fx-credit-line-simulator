@@ -1,9 +1,9 @@
-import { OUTRIGHT_TENORS, PAIRS, SWAP_TENORS, nextWeekday, valueDates } from './calendar';
+import { OUTRIGHT_TENORS, PAIRS, SWAP_TENORS, isWeekend, nextWeekday, valueDates } from './calendar';
 import { defaultState } from './defaults';
 import { checkTrade } from './lines';
 import { usdPerUnit } from './market';
 import { makeCtx, type Ctx } from './risk';
-import type { AppState, Ticket, Trade } from './types';
+import type { AppState, ISODate, Ticket, Trade } from './types';
 
 export const MAX_AMOUNT_USD = 50_000_000;
 
@@ -58,8 +58,20 @@ export type Action =
   | { type: 'FILL'; id: string }
   | { type: 'REJECT'; id: string }
   | { type: 'NEXT_DAY' }
+  | { type: 'GO_TO'; date: ISODate }
   | { type: 'RESET' }
   | { type: 'EDIT'; change: (draft: AppState) => void };
+
+/** The holiday tables end here. */
+export const LAST_DATE = '2029-12-31';
+
+/** Move to a later business date. Quotes do not live overnight: anything still
+ *  in flight lapses and its reservation is released. */
+const goTo = (s: AppState, date: ISODate): AppState => ({
+  ...s,
+  businessDate: date,
+  trades: s.trades.map((t) => (t.status === 'IN_FLIGHT' ? { ...t, status: 'EXPIRED' } : t)),
+});
 
 const setStatus = (s: AppState, id: string, status: Trade['status']): AppState => ({
   ...s,
@@ -80,12 +92,13 @@ export function reducer(s: AppState, a: Action): AppState {
     case 'REJECT':
       return setStatus(s, a.id, 'REJECTED');
     case 'NEXT_DAY':
-      // Quotes do not live overnight: anything still in flight lapses and its reservation is released.
-      return {
-        ...s,
-        businessDate: nextWeekday(s.businessDate),
-        trades: s.trades.map((t) => (t.status === 'IN_FLIGHT' ? { ...t, status: 'EXPIRED' } : t)),
-      };
+      return goTo(s, nextWeekday(s.businessDate));
+    case 'GO_TO': {
+      // Forward only, to a weekday, within the years the holiday tables cover.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(a.date) || a.date > LAST_DATE) return s;
+      const date = isWeekend(a.date) ? nextWeekday(a.date) : a.date;
+      return date > s.businessDate ? goTo(s, date) : s;
+    }
     case 'RESET':
       return defaultState();
     case 'EDIT': {

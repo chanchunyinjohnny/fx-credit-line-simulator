@@ -32,6 +32,9 @@ body { margin: 0; background: #fafaf7; }
 .controls .date { font-variant-numeric: tabular-nums; }
 .controls .label { font-size: 13px; color: var(--muted); }
 .controls button, .row-actions button { border: 1px solid var(--rule); background: #fff; padding: 5px 12px; border-radius: 2px; }
+.controls button:disabled { color: var(--muted); background: var(--tint); cursor: not-allowed; }
+.jump { display: inline-flex; align-items: center; gap: 8px; margin-left: 6px; }
+.controls .jump input[type='date'] { height: 32px; width: auto; padding: 0 6px; }
 .lang { display: flex; align-items: center; gap: 10px; margin-left: 6px; }
 .lang button { background: none; border: 0; padding: 3px 0; color: var(--muted); border-bottom: 2px solid transparent; border-radius: 0; min-width: 28px; }
 .lang button[aria-pressed='true'] { color: var(--accent); border-bottom-color: var(--accent); }
@@ -53,7 +56,7 @@ body { margin: 0; background: #fafaf7; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 124px; }
 .field-narrow { min-width: 0; width: 98px; }
 .label { font-size: 13px; color: var(--muted); }
-.app select, .app input[type='number'] { height: 38px; border: 1px solid var(--rule); background: #fff; padding: 0 8px; border-radius: 2px; width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+.app select, .app input[type='number'], .app input[type='date'] { height: 38px; border: 1px solid var(--rule); background: #fff; padding: 0 8px; border-radius: 2px; width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
 .app input[type='checkbox'] { accent-color: var(--accent); width: 16px; height: 16px; }
 .segmented { display: inline-flex; height: 38px; border: 1px solid var(--rule); border-radius: 2px; background: #fff; }
 .segmented button { white-space: nowrap; border: 0; background: none; padding: 0 13px; border-right: 1px solid var(--rule); }

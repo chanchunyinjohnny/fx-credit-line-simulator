@@ -14,7 +14,7 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Time pillars.** Pre-settlement lines are set per maturity pillar. A hedge counts in the pillar it matures in and in every shorter one.
 - **Check, reserve, fill.** A hedge is checked before it goes out. Sending it reserves the room; a fill turns the reservation into utilisation; a rejection releases it. Without the reservation, two hedges in flight could both pass and both fill.
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
-- **Time passing.** "Next day" revalues open hedges, drops settled payments out of settlement risk, and shows what the new day starts with.
+- **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
 ## The three views
 
@@ -54,7 +54,7 @@ Pre-settlement and settlement risk are credit policy rather than pricing, so no 
 ```sh
 npm install
 npm run dev      # local server
-npm test         # 29 tests
+npm test         # 31 tests
 npm run build    # static site in dist/
 npm run oracle   # regenerate the QuantLib reference values (needs uv)
 ```

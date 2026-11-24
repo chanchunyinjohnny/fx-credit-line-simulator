@@ -1,9 +1,11 @@
 import { useEffect, useReducer, useState } from 'react';
-import { rollSummary, type RollSummary } from './engine/roll';
-import { loadState, reducer, saveState } from './engine/state';
+import { nextWeekday } from './engine/calendar';
+import { nextPillarStep, rollSummary, type PillarStep, type RollSummary } from './engine/roll';
+import { START_DATE as loadDefaultDate } from './engine/defaults';
+import { LAST_DATE, loadState, reducer, saveState, type Action } from './engine/state';
 import { Design } from './ui/Design';
 import { Formulae } from './ui/Formulae';
-import { day, mio, partyName } from './ui/format';
+import { day, mio, partyName, shortDay } from './ui/format';
 import { LangProvider, initialLang, saveLang, type Lang } from './ui/i18n';
 import { Simulator } from './ui/Simulator';
 
@@ -22,6 +24,8 @@ const T = {
     },
     date: 'Business date',
     next: 'Next day',
+    jump: 'Jump to',
+    go: 'Go',
     reset: 'Reset',
     confirm: 'Clear all hedges and edits?',
     yes: 'Yes, reset',
@@ -32,6 +36,8 @@ const T = {
     group: (g: string, b: string, a: string, sr: string | null) =>
       `${g}: pre-settlement risk ${b} → ${a} USD mio${sr ? `; ${sr} of settlement risk released as payments settled` : ''}.`,
     lapsed: (n: number) => `${n} hedge${n > 1 ? 's' : ''} still in flight lapsed, and the reservation was released.`,
+    steady: 'Prices have not moved, so market values barely change. The add-on steps down only when a hedge drops into a shorter pillar.',
+    step: (id: string, from: string, to: string, d: string) => `Next: ${id} moves from the ${from} pillar to ${to} on ${d}. Jump there to see it.`,
     footer: 'Chan Chun Yin Johnny · all data invented · saved in this browser only',
     source: 'Source',
   },
@@ -46,6 +52,8 @@ const T = {
     },
     date: '營業日',
     next: '下一營業日',
+    jump: '跳至',
+    go: '前往',
     reset: '重設',
     confirm: '清除所有對沖和修改？',
     yes: '確定重設',
@@ -55,6 +63,8 @@ const T = {
     nothing: '沒有未到期的對沖，所以沒有變化。先送出並成交一筆對沖；之後每過一日，系統會重估這筆對沖，並釋放已交收款項的結算風險。',
     group: (g: string, b: string, a: string, sr: string | null) => `${g}：交割前風險 ${b} → ${a} 百萬美元${sr ? `；款項已交收，釋放結算風險 ${sr}` : ''}。`,
     lapsed: (n: number) => `${n} 筆在途對沖已失效，預佔額度已釋放。`,
+    steady: '價格沒有變動，所以市值幾乎不變。附加金額只在對沖跨入更短的期限檔時才下降。',
+    step: (id: string, from: string, to: string, d: string) => `下一次：${id} 於 ${d} 由 ${from} 檔降至 ${to} 檔。跳到那天就能看到。`,
     footer: 'Chan Chun Yin Johnny · 所有數據均為虛構 · 只儲存在本瀏覽器',
     source: '原始碼',
   },
@@ -67,7 +77,8 @@ export function App() {
   const [tab, setTab] = useState<TabId>(tabFromHash);
   const [lang, setLang] = useState<Lang>(initialLang);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [note, setNote] = useState<RollSummary | null>(null); // what the last "next day" changed
+  const [note, setNote] = useState<(RollSummary & { step: PillarStep | null }) | null>(null); // what the last change of date did
+  const [jumpTo, setJumpTo] = useState(() => nextWeekday(state.businessDate));
   const t = T[lang];
 
   useEffect(() => saveState(state), [state]);
@@ -84,10 +95,15 @@ export function App() {
     window.history.replaceState(null, '', `#${id}`);
     setTab(id);
   };
-  const nextDay = () => {
-    setNote(rollSummary(state, reducer(state, { type: 'NEXT_DAY' })));
-    dispatch({ type: 'NEXT_DAY' });
+  /** Move the business date and say what that changed. */
+  const move = (action: Action) => {
+    const after = reducer(state, action);
+    if (after === state) return;
+    setNote({ ...rollSummary(state, after), step: nextPillarStep(after) });
+    setJumpTo((d) => (d > after.businessDate ? d : nextWeekday(after.businessDate)));
+    dispatch(action);
   };
+  const canJump = /^\d{4}-\d{2}-\d{2}$/.test(jumpTo) && jumpTo > state.businessDate && jumpTo <= LAST_DATE;
 
   return (
     <LangProvider value={lang}>
@@ -108,8 +124,15 @@ export function App() {
           <div className="controls">
             <span className="label">{t.date}</span>
             <span className="date">{day(state.businessDate, lang)}</span>
-            <button type="button" onClick={nextDay}>
+            <button type="button" onClick={() => move({ type: 'NEXT_DAY' })}>
               {t.next}
+            </button>
+            <label className="jump">
+              <span className="label">{t.jump}</span>
+              <input type="date" value={jumpTo} min={nextWeekday(state.businessDate)} max={LAST_DATE} onChange={(e) => setJumpTo(e.target.value)} />
+            </label>
+            <button type="button" disabled={!canJump} onClick={() => move({ type: 'GO_TO', date: jumpTo })}>
+              {t.go}
             </button>
             {confirmReset ? (
               <>
@@ -119,6 +142,7 @@ export function App() {
                   onClick={() => {
                     dispatch({ type: 'RESET' });
                     setNote(null);
+                    setJumpTo(nextWeekday(loadDefaultDate));
                     setConfirmReset(false);
                   }}
                 >
@@ -155,6 +179,8 @@ export function App() {
                   <p key={g.id}>{t.group(partyName(g.name, lang), mio(g.psrBefore), mio(g.psrAfter), g.srReleased > 0.5 ? mio(g.srReleased) : null)}</p>
                 ))}
                 {note.lapsed > 0 && <p>{t.lapsed(note.lapsed)}</p>}
+                {note.groups.length > 0 && note.groups.every((g) => Math.abs(g.psrAfter - g.psrBefore) < 0.05 * g.psrBefore) && <p>{t.steady}</p>}
+                {note.step && <p>{t.step(note.step.id, note.step.from, note.step.to, shortDay(note.step.date, lang))}</p>}
               </div>
               <button type="button" className="link" onClick={() => setNote(null)}>
                 {t.close}
