@@ -96,6 +96,8 @@ body { margin: 0; background: #fafaf7; }
 .bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .bar .seg { height: 100%; border-radius: 5px; min-width: 2px; }
 .bar-over { outline: 1px solid var(--bad-mark); outline-offset: 2px; }
+.bar-dense { height: 4px; border-radius: 2px; margin-top: 6px; }
+.bar-dense .seg { border-radius: 2px; }
 .seg-used { background: var(--s-used); }
 .seg-reserved { background: var(--s-reserved); }
 .seg-hedge { background: var(--s-hedge); }
@@ -122,6 +124,11 @@ body { margin: 0; background: #fafaf7; }
 .table.text-table th, .table.text-table td { text-align: left; vertical-align: top; font-size: 15px; }
 .table.text-table th { font-size: 12px; }
 .table.compact { width: auto; min-width: min(420px, 100%); }
+.overview th, .overview td { text-align: left; vertical-align: top; min-width: 96px; }
+.overview th { white-space: normal; }
+.overview th:first-child, .overview td:first-child { min-width: 190px; white-space: normal; }
+.th-sub, .td-sub { display: block; font-size: 12px; font-weight: 400; color: var(--muted); }
+.overview .td-sub { margin-top: 3px; }
 .hedges td, .hedges th { text-align: left; }
 .hedges td:nth-child(4), .hedges th:nth-child(4), .hedges td:last-child { text-align: right; }
 .row-actions { display: inline-flex; gap: 6px; align-items: center; }

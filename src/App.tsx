@@ -7,18 +7,20 @@ import { Design } from './ui/Design';
 import { Formulae } from './ui/Formulae';
 import { day, mio, partyName, shortDay } from './ui/format';
 import { LangProvider, initialLang, saveLang, type Lang } from './ui/i18n';
+import { Lines } from './ui/Lines';
 import { Simulator } from './ui/Simulator';
 
-const TAB_IDS = ['simulator', 'formulae', 'design'] as const;
+const TAB_IDS = ['simulator', 'lines', 'formulae', 'design'] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const T = {
   en: {
     docTitle: 'FX Credit Line Simulator',
     suffix: 'FX HEDGING SIMULATOR',
-    tabs: { simulator: 'Simulator', formulae: 'Formulae', design: 'Design' },
+    tabs: { simulator: 'Simulator', lines: 'Lines', formulae: 'Formulae', design: 'Design' },
     headings: {
       simulator: ['Does this hedge fit the credit lines?', 'Enter a hedge, pick an LP, send it, then fill or reject it.'],
+      lines: ['Where every credit line stands', 'Today for each banking group, and settlement risk date by date.'],
       formulae: ['How the numbers are worked out', 'The method, and one swap followed step by step.'],
       design: ['From first draft to proposed flow', 'What a review of the hedging flow changed.'],
     },
@@ -44,9 +46,10 @@ const T = {
   zh: {
     docTitle: '外匯對沖授信額度模擬',
     suffix: '外匯對沖額度模擬',
-    tabs: { simulator: '模擬', formulae: '公式', design: '流程設計' },
+    tabs: { simulator: '模擬', lines: '額度', formulae: '公式', design: '流程設計' },
     headings: {
       simulator: ['這筆對沖放得進授信額度嗎？', '輸入一筆對沖，選 LP，送出，再選成交或拒絕。'],
+      lines: ['各條授信額度的現況', '今日各銀行集團的額度，以及逐日的結算風險。'],
       formulae: ['數字是怎樣算出來的', '計算方法，加一筆掉期的逐步演算。'],
       design: ['從初稿到建議流程', '檢視對沖流程後改了什麼。'],
     },
@@ -192,6 +195,7 @@ export function App() {
             <p className="subheading">{t.headings[tab][1]}</p>
           </div>
           {tab === 'simulator' && <Simulator state={state} dispatch={dispatch} />}
+          {tab === 'lines' && <Lines state={state} />}
           {tab === 'formulae' && <Formulae />}
           {tab === 'design' && <Design />}
         </main>

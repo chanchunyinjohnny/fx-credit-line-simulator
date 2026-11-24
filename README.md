@@ -16,11 +16,12 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
 - **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
-## The three views
+## The four views
 
 | View | What it is for |
 | --- | --- |
 | Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data and credit lines open on demand |
+| Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
 | Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, and the open questions |
 

@@ -7,6 +7,7 @@ import type { AppState, Group, Product, RateTenor, Tenor, Ticket, Trade } from '
 import { NumInput, Status } from './bits';
 import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, partyName, rate, shortDay, signedMio } from './format';
 import { useLang, type Lang } from './i18n';
+import { BarLegend, LineBar } from './LineBar';
 import { Workings } from './Workings';
 
 const M = 1_000_000;
@@ -39,10 +40,8 @@ const T = {
     psr: 'Pre-settlement risk',
     sr: 'Settlement risk',
     unit: 'USD mio',
-    legend: ['In use', 'Reserved', 'This hedge'],
     of: (a: string, l: string) => `${a} of ${l}`,
     overBy: (x: string) => `over by ${x}`,
-    barLabel: (k: string, a: string, l: string, over: boolean) => `${k}: ${a} of ${l} USD mio${over ? ', over the line' : ''}`,
     srNone: (g: string) => `none with ${g}.`,
     viaCls: 'This hedge settles through CLS.',
     viaCash: 'An NDF pays one net amount.',
@@ -104,10 +103,8 @@ const T = {
     psr: '交割前風險',
     sr: '結算風險',
     unit: '百萬美元',
-    legend: ['已用', '預佔', '本筆'],
     of: (a: string, l: string) => `${a} / ${l}`,
     overBy: (x: string) => `超出 ${x}`,
-    barLabel: (k: string, a: string, l: string, over: boolean) => `${k}：${a} / ${l} 百萬美元${over ? '，超出額度' : ''}`,
     srNone: (g: string) => `${g}沒有。`,
     viaCls: '本筆經 CLS 同步交收。',
     viaCash: 'NDF 只支付一筆差額。',
@@ -383,23 +380,6 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
 }
 
 // ------------------------------------------------------------ credit lines
-const SEGMENTS = ['seg-used', 'seg-reserved', 'seg-hedge'] as const;
-
-function Bar({ row }: { row: LineRow }) {
-  const t = T[useLang()];
-  const parts = [row.used, row.reserved, row.hedge].map((v, i) => ({ v, cls: SEGMENTS[i], name: t.legend[i] })).filter((p) => p.v > 0.5);
-  const total = Math.max(row.after, 0);
-  const sum = parts.reduce((s, p) => s + p.v, 0);
-  // Netting can make a part negative; the bar then shows the true total.
-  const scale = sum > 0 ? total / sum : 0;
-  const full = Math.max(row.line, total);
-  return (
-    <div className={row.ok ? 'bar' : 'bar bar-over'} role="img" aria-label={t.barLabel(row.label, mio(total), mio(row.line), !row.ok)}>
-      {full > 0 && parts.map((p) => <span key={p.cls} className={`seg ${p.cls}`} style={{ width: `${((p.v * scale) / full) * 100}%` }} title={`${p.name}: ${mio(p.v)}`} />)}
-    </div>
-  );
-}
-
 function LineBars({ title, group, rows, legend }: { title: string; group: string; rows: LineRow[]; legend?: boolean }) {
   const t = T[useLang()];
   return (
@@ -411,20 +391,12 @@ function LineBars({ title, group, rows, legend }: { title: string; group: string
             · {group} · {t.unit}
           </span>
         </h2>
-        {legend && (
-          <ul className="legend">
-            {t.legend.map((name, i) => (
-              <li key={name}>
-                <span className={`seg ${SEGMENTS[i]}`} /> {name}
-              </li>
-            ))}
-          </ul>
-        )}
+        {legend && <BarLegend withHedge />}
       </div>
       {rows.map((r) => (
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>
           <span className="line-label">{r.label}</span>
-          <Bar row={r} />
+          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.hedge]} total={r.after} ok={r.ok} />
           <span className="line-figure">{r.ok ? t.of(mio(r.after), mio(r.line)) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</span>
         </div>
       ))}
