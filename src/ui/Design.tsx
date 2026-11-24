@@ -11,7 +11,7 @@ const T = {
     fix: 'In the proposal',
     rows: [
       ['The limit had no unit; trade size was deducted', 'Two lines: pre-settlement risk and settlement risk'],
-      ['Nothing held the room between check and fill', 'Check and reserve in one step; release on reject or timeout'],
+      ['Nothing held the room between check and fill', 'Check and reserve in one step; release when the LP rejects or the venue confirms no trade'],
       ['The limit was kept per LP', 'Lines sit on the banking group, across entities and channels'],
       ['Exposure only ever went up', 'Revalued daily; settled payments drop out'],
       ['A trader could edit the limit', 'The credit owner sets lines; the desk reads them'],
@@ -30,6 +30,7 @@ const T = {
       'Settlement risk is counted on the value date only.',
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
+      'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
     ],
   },
   zh: {
@@ -41,7 +42,7 @@ const T = {
     fix: '建議的做法',
     rows: [
       ['額度沒有量度單位，直接扣交易金額', '兩條額度：交割前風險和結算風險'],
-      ['檢查與成交之間沒有保留額度', '檢查和預佔一步完成；被拒或逾時即釋放'],
+      ['檢查與成交之間沒有保留額度', '檢查和預佔一步完成；LP 拒絕或場地確認沒有成交才釋放'],
       ['額度按 LP 記錄', '額度設在銀行集團層面，涵蓋旗下實體和所有渠道'],
       ['風險只增不減', '每日重估；已交收的款項剔除'],
       ['交易員可以改額度', '由授信管理部門設定額度，交易台只能查看'],
@@ -60,6 +61,7 @@ const T = {
       '結算風險只計交割日當天。',
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
+      'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',
     ],
   },
 } as const;

@@ -54,7 +54,7 @@
   - 詢價時對所有 LP 預佔：浪費額度。
   - 成交後才扣：會超額。
   - 選定 LP、準備下單時：只佔一家，時間最短。
-- **結論：** 選定 LP 的那一刻，檢查和預佔一步完成。被拒、逾時、過夜都即時釋放。原本的初步檢查保留，但只用來篩選 LP，不佔額度。
+- **結論：** 選定 LP 的那一刻，檢查和預佔一步完成。LP 拒絕就釋放。LP 沒有回覆時不能直接釋放：交易可能已在場地成交，要先向場地查明。原本的初步檢查保留，但只用來篩選 LP，不佔額度。
 
 ### 6. 風險會不會隨時間變？
 
@@ -193,7 +193,10 @@
 | 每個期限檔和交割日，交易後不超出額度才算通過 | 設計 |
 | 不增加風險的對沖，即使額度已超出也算通過 | 假設 |
 | 不通過就攔截，系統內沒有例外；例外由交易員人手處理 | 已確認 |
-| 初步檢查不佔額度；選定 LP 送出時檢查並預佔；成交後轉為已用；被拒或換日即釋放 | 設計 |
+| 初步檢查不佔額度；選定 LP 送出時檢查並預佔；成交後轉為已用；LP 拒絕即釋放 | 設計 |
+| LP 5 秒內沒有回覆，就向場地查詢並通知交易員；場地確認沒有成交才釋放預佔額度 | 假設。360T 和 Bloomberg 沒有公布回覆時限。五家 LP 公布的電子 last look 是 0 至 15 毫秒，其他場地強制的時限是 20 至 30 毫秒，5 秒已留有餘地。人手確認的報價要更長，按渠道設定 |
+| 沒有回覆不等於沒有成交：以場地的紀錄為準 | 已核實（FIX 訂單狀態規範；360T 和 Bloomberg 的場地規則） |
+| 換日時仍在途的對沖當作沒有成交，預佔額度釋放 | 簡化：實際上要先由人手查明結果 |
 | 單一 LP 整筆成交，上限 5,000 萬美元；沒有部分成交和滑點邏輯；跨渠道拆單不建模 | 範圍 |
 | LP 一方的檢查由使用者按「成交」或「拒絕」代表 | 簡化 |
 | 額度設在銀行集團；每個 LP 只屬於一個集團 | 設計 |
@@ -220,6 +223,7 @@
 1. 結算風險只計交割日當天。
 2. 附加因子按剩餘期限分檔，各產品相同。
 3. 市值為負時，附加金額不減少。
+4. LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。數值要向 360T 和 Bloomberg 查證。
 
 ## 資料來源
 
@@ -235,6 +239,11 @@
 - 香港財資市場公會，Code of Conduct and Practice。https://www.tma.org.hk/PubFile/TMACode.pdf
 - OpenGamma，Interest Rate Instruments and Market Conventions Guide（二手來源）。https://quant.opengamma.io/Interest-Rate-Instruments-and-Market-Conventions.pdf
 - CME Group，EBS Value Date Calendar（二手來源）。https://www.cmegroup.com/content/dam/cmegroup/documents/ebs_value-date-calendar.pdf
+- 360T MTF Rulebook v4.0，2025 年 11 月。https://www.360t.com/wp-content/uploads/2025/11/360T-MTF-Rulebook-v4.0-12-November-2025-1.pdf
+- Bloomberg BMTF Rulebook，2026 年 4 月。https://assets.bbhub.io/professional/sites/27/BMTF-Rulebook-Effective-17-APR-26.pdf
+- Cboe FX，Market Maker Standards。https://cdn.cboe.com/resources/fx/market-maker-standards.pdf
+- LP 的 last look 披露文件：XTX Markets https://www.xtxmarkets.com/assets/disclosures/global-efx-cover-sheet.pdf ；Deutsche Bank https://www.db.com/legal-resources/foreign-exchange-disclosures-terms-and-conditions-of-fx-dealing/GFXC-Liquidity-Provider-Disclosure-Cover-Sheet.pdf ；Morgan Stanley https://www.morganstanley.com/content/dam/msdotcom/en/assets/pdfs/sales_and_trading_disclosures/MS_LP_Cover_Sheet.pdf ；Citi https://www.citigroup.com/rcs/citigpa/storage/public/icpublic/electronic_execution_disclosure.pdf ；Bank of America https://business.bofa.com/content/dam/flagship/pdf/FX_Global_Code_liquidity_provider_disclosure_cover_sheet.pdf
+- FIX 4.2 規範（第三方鏡像）。https://xml.coverpages.org/fix-42-with_errata_20010501.pdf
 
 ## 相關檔案
 

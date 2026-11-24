@@ -54,7 +54,7 @@ const T = {
       },
       {
         title: 'The check',
-        text: 'A hedge goes out only if every pillar and date stays within its line. Sending reserves the room until the LP fills or rejects.',
+        text: 'A hedge goes out only if every pillar and date stays within its line. Sending reserves the room until the LP fills or rejects. With no answer after 5 seconds the venue is asked, and the room stays reserved until it confirms no trade.',
         calcs: ["headroom = credit line − earlier days − today's fills − reservations"],
       },
     ],
@@ -119,7 +119,7 @@ const T = {
       },
       {
         title: '交易前檢查',
-        text: '每個期限檔和每個交收日都不超出額度，對沖才可送出。送出時預佔額度，直至 LP 成交或拒絕。',
+        text: '每個期限檔和每個交收日都不超出額度，對沖才可送出。送出時預佔額度，直至 LP 成交或拒絕。LP 5 秒內沒有回覆，就向場地查詢；確認沒有成交才釋放。',
         calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔'],
       },
     ],
