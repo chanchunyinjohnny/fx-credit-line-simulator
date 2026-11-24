@@ -24,6 +24,8 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 | Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, and the open questions |
 
+Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time.
+
 ## Method
 
 | Quantity | Rule |
