@@ -40,10 +40,10 @@ const T = {
       },
       {
         title: 'Pre-settlement risk',
-        text: "Today's value plus an add-on for how far it could still move. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one.",
+        text: "Today's value if it is positive, plus an add-on for how far it could still move. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one.",
         calcs: [
-          'exposure = max(market value + notional × add-on %, 0)',
-          'with close-out netting: max(Σ market value + (0.4 + 0.6 × NGR) × Σ add-on, 0)',
+          'exposure = max(market value, 0) + notional × add-on %',
+          'with close-out netting: max(Σ market value, 0) + (0.4 + 0.6 × NGR) × Σ add-on',
           'NGR = max(Σ market value, 0) ÷ Σ max(market value, 0)',
         ],
       },
@@ -61,8 +61,8 @@ const T = {
     steps: 'The same swap, step by step',
     dealt: (d: string) => `The day it is dealt, ${d}`,
     later: (r: string) => `A week later, spot up 1% to ${r}`,
-    laterText: (k: string, mv: string, a: string, b: string, c: string) =>
-      `We sell EUR on the far leg at ${k}, now below the market. The market value is USD ${mv}, which offsets part of the add-on: exposure falls from ${a} to ${b}. Dealt the other way round it would have risen to ${c}.`,
+    laterText: (k: string, mv: string, a: string, c: string) =>
+      `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
     checked: 'Checked against QuantLib',
     checkedText: (v: string, n: string, ok: boolean) =>
       `The app calculates everything itself. As a check, ${v} computed ${n} reference values and the app ${ok ? 'reproduces all of them' : 'does not reproduce all of them'}, recomputed in your browser just now.`,
@@ -71,13 +71,16 @@ const T = {
     none: 'none',
     dates: (n: number) => `${n} dates`,
     cent: 'under USD 0.01',
-    more: 'Limits and sources',
+    more: 'Assumptions, limits and sources',
     notes: [
       'Pre-settlement and settlement risk are credit rules, not pricing. They are tested against hand-worked cases, not a library.',
+      'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
+      'Net-to-gross ratio and add-on netting: Basel II framework, Annex 4. With no positive market value the ratio is taken as 1, as the US swap margin rule does for the same formula.',
+      'Settlement risk is what is due to be received, counted on the value date only (the "calendar day" method). Basel guidance on FX settlement risk (2013) notes that this can understate it: the exposure runs from when our payment can no longer be cancelled until receipt is confirmed.',
+      'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a hedge with a payment due today is assumed to settle gross.',
+      'The implied interest rate uses Actual/365 for GBP and Actual/360 for USD, EUR, JPY and CNH. Actual/365 for TWD is not confirmed.',
       'QuantLib has no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
-      'Net-to-gross ratio and add-on netting: Basel II framework, Annex 4 (current exposure method).',
-      'Settlement risk as the amount bought: Basel Committee guidance on FX settlement risk (2013).',
-      'Payment-versus-payment and eligible currencies: CLS Group.',
+      'Every assumption is listed in the design notes in the source repository.',
     ],
   },
   zh: {
@@ -102,10 +105,10 @@ const T = {
       },
       {
         title: '交割前風險',
-        text: '今日市值，加上一個反映日後可能波動的附加金額。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。',
+        text: '今日市值（為正數時），加上一個反映日後可能波動的附加金額。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。',
         calcs: [
-          '風險敞口 = max(市值 + 名義本金 × 附加因子 %, 0)',
-          '有終止淨額結算：max(Σ 市值 + (0.4 + 0.6 × NGR) × Σ 附加金額, 0)',
+          '風險敞口 = max(市值, 0) + 名義本金 × 附加因子 %',
+          '有終止淨額結算：max(Σ 市值, 0) + (0.4 + 0.6 × NGR) × Σ 附加金額',
           'NGR = max(Σ 市值, 0) ÷ Σ max(市值, 0)',
         ],
       },
@@ -123,8 +126,8 @@ const T = {
     steps: '同一筆掉期，逐步計算',
     dealt: (d: string) => `成交當日：${d}`,
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
-    laterText: (k: string, mv: string, a: string, b: string, c: string) =>
-      `遠端我方以 ${k} 賣出 EUR，現已低於市價。市值為 USD ${mv}，抵銷了部分附加金額：風險敞口由 ${a} 降至 ${b}。若方向相反，則會升至 ${c}。`,
+    laterText: (k: string, mv: string, a: string, c: string) =>
+      `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
     checked: '與 QuantLib 核對',
     checkedText: (v: string, n: string, ok: boolean) =>
       `所有數字都由本程式自行計算。作為核對，${v} 另外算出 ${n} 個參考值，本程式${ok ? '全部重現' : '未能全部重現'}（剛在你的瀏覽器重新計算）。`,
@@ -133,13 +136,16 @@ const T = {
     none: '無',
     dates: (n: number) => `${n} 個日期`,
     cent: '少於 USD 0.01',
-    more: '限制與資料來源',
+    more: '假設、限制與資料來源',
     notes: [
       '交割前風險和結算風險屬信貸規則，不是定價，因此以手算個案測試，而非程式庫。',
+      '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
+      '淨額對總額比率（NGR）與附加金額的淨額計算：巴塞爾協定二，附件四。沒有任何正市值時 NGR 取 1，與美國掉期保證金規則對同一公式的處理相同。',
+      '結算風險是我方應收的金額，只計在交割日當天（「日曆日」方法）。巴塞爾 2013 年外匯結算風險指引指出這可能低估風險：敞口實際上由我方付款不能再撤回開始，直至確認收款為止。',
+      'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以有當日到期款項的對沖假設為全額結算。',
+      '隱含利率的計息日數：GBP 用 Actual/365，USD、EUR、JPY、CNH 用 Actual/360；TWD 用 Actual/365，未經證實。',
       'QuantLib 沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
-      '淨額對總額比率（NGR）與附加金額的淨額計算：巴塞爾協定二，附件四（現行風險暴露法）。',
-      '結算風險以買入金額計：巴塞爾委員會外匯結算風險指引（2013）。',
-      '同步交收及合資格貨幣：CLS Group。',
+      '所有假設都列在原始碼倉庫的設計說明裡。',
     ],
   },
 } as const;
@@ -251,13 +257,7 @@ export function Formulae() {
       <Workings ctx={ex.ctx0} trade={ex.trade} risk={ex.check.risk} measured={ex.check.after} group={ex.check.group} isNew />
       <h3>{t.later(rate('EURUSD', LATER_SPOT))}</h3>
       <p>
-        {t.laterText(
-          rate('EURUSD', far.rate),
-          signedAmt(ex.risk1.mv),
-          amt(ex.check.risk.exposure),
-          amt(ex.risk1.exposure),
-          amt(Math.max(-ex.risk1.mv + ex.risk1.addOn, 0)),
-        )}
+        {t.laterText(rate('EURUSD', far.rate), signedAmt(ex.risk1.mv), amt(ex.risk1.exposure), amt(Math.max(-ex.risk1.mv, 0) + ex.risk1.addOn))}
       </p>
       <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} />
 

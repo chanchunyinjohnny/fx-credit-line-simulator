@@ -72,6 +72,8 @@ export interface AppState {
   groups: Group[];
   lps: Lp[];
   addOnPct: number[]; // percent of notional, one per time pillar
+  /** Internal variant: a negative market value reduces the add-on. Off is the standard method. */
+  offsetNegativeMv?: boolean;
   trades: Trade[];
   nextId: number;
 }

@@ -42,6 +42,9 @@ body { margin: 0; background: #fafaf7; }
 .day-note { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-left: 2px solid var(--accent); background: var(--soft); padding: 12px 14px; margin-bottom: 22px; }
 .day-note p { margin: 4px 0 0; }
 .hint { margin-bottom: 10px; max-width: 72ch; }
+.note { font-size: 13px; color: var(--muted); }
+.setting { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 4px; max-width: 72ch; }
+.setting input { margin-top: 3px; flex-shrink: 0; }
 .main { padding: 30px 30px 26px; width: 100%; max-width: 1040px; margin: 0 auto; flex: 1; }
 .heading { margin-bottom: 22px; }
 .heading h1 { font-family: var(--display); font-weight: 500; font-size: 30px; line-height: 1.25; margin: 0 0 6px; text-wrap: balance; }

@@ -7,16 +7,18 @@ export interface Ctx {
   t0: ISODate;
   market: MarketData;
   addOnPct: number[];
+  offsetNegativeMv: boolean;
   pillarEnds: ISODate[];
   curve(pair: PairId): FxCurve;
 }
 
-export function makeCtx(s: { businessDate: ISODate; market: MarketData; addOnPct: number[] }): Ctx {
+export function makeCtx(s: { businessDate: ISODate; market: MarketData; addOnPct: number[]; offsetNegativeMv?: boolean }): Ctx {
   const curves = new Map<PairId, FxCurve>();
   return {
     t0: s.businessDate,
     market: s.market,
     addOnPct: s.addOnPct,
+    offsetNegativeMv: s.offsetNegativeMv ?? false,
     pillarEnds: pillarEnds(s.businessDate),
     curve(pair) {
       let c = curves.get(pair);
@@ -54,8 +56,15 @@ export interface TradeRisk {
   notionalUsd: number; // last (forward) leg, base currency amount at spot
   addOnPct: number;
   addOn: number; // USD
-  exposure: number; // USD, standalone: max(mv + addOn, 0)
+  exposure: number; // USD, standalone: see exposureOf
 }
+
+/** Exposure from a market value and an add-on.
+ *  Standard (current exposure method): max(mv, 0) + add-on. A trade that is out
+ *  of the money can still turn positive, so its add-on is kept in full.
+ *  Offset variant, used by some internal limit systems: max(mv + add-on, 0). */
+export const exposureOf = (mv: number, addOn: number, offsetNegativeMv: boolean) =>
+  offsetNegativeMv ? Math.max(mv + addOn, 0) : Math.max(mv, 0) + addOn;
 
 export function valueTrade(ctx: Ctx, trade: Trade): TradeRisk {
   const legs = trade.legs.filter((l) => l.date >= ctx.t0).map((l) => valueLeg(ctx, trade.pair, l));
@@ -69,7 +78,7 @@ export function valueTrade(ctx: Ctx, trade: Trade): TradeRisk {
   const notionalUsd = Math.abs(last.base) * usdPerUnit(ctx.market, PAIRS[trade.pair].base);
   const addOnPct = pillar >= 0 ? ctx.addOnPct[pillar] : 0;
   const addOn = (notionalUsd * addOnPct) / 100;
-  const exposure = pillar >= 0 ? Math.max(mv + addOn, 0) : 0;
+  const exposure = pillar >= 0 ? exposureOf(mv, addOn, ctx.offsetNegativeMv) : 0;
   return { trade, legs, mv, maturity, pillar, notionalUsd, addOnPct, addOn, exposure };
 }
 
@@ -86,11 +95,11 @@ export interface PillarAgg {
 
 /** PSR per time pillar for one group. A trade counts in the pillar its maturity
  *  falls in and in every shorter pillar.
- *  Without close-out netting: the sum of each trade's max(mv + add-on, 0).
- *  With it: max(sum of mv + net add-on, 0), where
+ *  Without close-out netting: the sum of each trade's own exposure.
+ *  With it: the exposure of the summed market value and the net add-on, where
  *  net add-on = (0.4 + 0.6 x NGR) x gross add-on and
  *  NGR = max(sum of mv, 0) / sum of max(mv, 0). */
-export function psrByPillar(risks: TradeRisk[], closeOutNetting: boolean): PillarAgg[] {
+export function psrByPillar(risks: TradeRisk[], closeOutNetting: boolean, offsetNegativeMv = false): PillarAgg[] {
   return PILLARS.map((_, p) => {
     const set = risks.filter((r) => r.pillar >= p);
     const sumMv = set.reduce((s, r) => s + r.mv, 0);
@@ -100,10 +109,11 @@ export function psrByPillar(risks: TradeRisk[], closeOutNetting: boolean): Pilla
       const exposure = set.reduce((s, r) => s + r.exposure, 0);
       return { count: set.length, sumMv, sumPositiveMv, ngr: 1, addOnGross, addOnNet: addOnGross, exposure };
     }
-    // With no positive market value the ratio is undefined; 1 keeps the full add-on.
+    // With no positive market value the ratio is undefined; 1 keeps the full add-on
+    // (the value the US swap margin rule gives for the same formula).
     const ngr = sumPositiveMv > 0 ? Math.max(sumMv, 0) / sumPositiveMv : 1;
     const addOnNet = (0.4 + 0.6 * ngr) * addOnGross;
-    return { count: set.length, sumMv, sumPositiveMv, ngr, addOnGross, addOnNet, exposure: Math.max(sumMv + addOnNet, 0) };
+    return { count: set.length, sumMv, sumPositiveMv, ngr, addOnGross, addOnNet, exposure: exposureOf(sumMv, addOnNet, offsetNegativeMv) };
   });
 }
 

@@ -27,7 +27,7 @@ export interface Measured {
 }
 function measure(ctx: Ctx, group: Group, trades: Trade[]): Measured {
   const risks = trades.map((t) => valueTrade(ctx, t));
-  return { risks, psr: psrByPillar(risks, group.closeOutNetting), sr: srByDate(ctx, trades, group.paymentNetting) };
+  return { risks, psr: psrByPillar(risks, group.closeOutNetting, ctx.offsetNegativeMv), sr: srByDate(ctx, trades, group.paymentNetting) };
 }
 const srOn = (m: Measured, date: ISODate) => m.sr.get(date)?.exposure ?? 0;
 

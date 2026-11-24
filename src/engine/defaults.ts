@@ -38,6 +38,7 @@ export function defaultState(): AppState {
       { id: 'E-FXGO', name: 'Bank E', channel: 'FXGO', groupId: 'E' },
     ],
     addOnPct: [0.2, 0.5, 1.0, 2.0, 3.0, 4.5],
+    offsetNegativeMv: false,
     trades: [],
     nextId: 1,
   };

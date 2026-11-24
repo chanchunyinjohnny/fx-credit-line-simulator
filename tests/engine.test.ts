@@ -4,7 +4,7 @@ import { PILLARS, pillarEnds, pillarIndex, spotDate, tenorDate, tomDate } from '
 import { defaultState } from '../src/engine/defaults';
 import { board, checkTrade } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
-import { makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
+import { exposureOf, makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
 import { nextPillarStep, rollSummary } from '../src/engine/roll';
 import { buildTrade, reducer } from '../src/engine/state';
 import type { AppState, PairId, Tenor, Ticket, Trade } from '../src/engine/types';
@@ -53,7 +53,7 @@ const deal = (s: AppState, t: Ticket): Trade => {
   return built;
 };
 const risk = (pillar: number, mv: number, addOn: number): TradeRisk =>
-  ({ pillar, mv, addOn, exposure: Math.max(mv + addOn, 0) }) as TradeRisk;
+  ({ pillar, mv, addOn, exposure: Math.max(mv, 0) + addOn }) as TradeRisk;
 
 describe('time pillars', () => {
   it('a tenor traded from spot falls in the pillar of the same name', () => {
@@ -84,9 +84,20 @@ describe('pre-settlement risk', () => {
     expect(PILLARS[valueTrade(makeCtx(s), late).pillar]).toBe('1Y');
   });
 
-  it('a negative market value offsets the add-on, floored at zero', () => {
-    expect(risk(3, -100, 300).exposure).toBe(200);
-    expect(risk(3, -500, 300).exposure).toBe(0);
+  it('a negative market value does not reduce the add-on, unless the offset variant is switched on', () => {
+    expect(exposureOf(250, 300, false)).toBe(550);
+    expect(exposureOf(-100, 300, false)).toBe(300); // standard: the add-on is kept in full
+    expect(exposureOf(-100, 300, true)).toBe(200); // variant: the negative value offsets it
+    expect(exposureOf(-500, 300, true)).toBe(0);
+
+    const s = { ...defaultState(), offsetNegativeMv: true };
+    const t = deal(s, ticket());
+    const cheap = { ...t, legs: [t.legs[0], { ...t.legs[1], rate: t.legs[1].rate - 0.01 }] }; // we sell EUR 1 cent too low
+    const standard = valueTrade(makeCtx(defaultState()), cheap);
+    const variant = valueTrade(makeCtx(s), cheap);
+    expect(standard.mv).toBeLessThan(0);
+    expect(standard.exposure).toBeCloseTo(standard.addOn, 6);
+    expect(variant.exposure).toBeCloseTo(standard.addOn + standard.mv, 6);
   });
 
   it('a trade counts in its own pillar and every shorter one', () => {
@@ -96,20 +107,21 @@ describe('pre-settlement risk', () => {
 
   it('without netting, exposures add up trade by trade', () => {
     const agg = psrByPillar([risk(0, 100, 50), risk(0, -80, 30)], false);
-    expect(agg[0].exposure).toBe(150); // max(150,0) + max(-50,0)
+    expect(agg[0].exposure).toBe(180); // (100 + 50) + (0 + 30)
   });
 
   it('with netting, market values offset and the add-on is scaled by the net-to-gross ratio', () => {
     const [a] = psrByPillar([risk(0, 100, 50), risk(0, -80, 30)], true);
     expect(a.ngr).toBeCloseTo(0.2, 12); // max(20,0) / 100
     expect(a.addOnNet).toBeCloseTo((0.4 + 0.6 * 0.2) * 80, 12); // 41.6
-    expect(a.exposure).toBeCloseTo(20 + 41.6, 12);
+    expect(a.exposure).toBeCloseTo(20 + 41.6, 12); // max(20, 0) + net add-on
   });
 
   it('with netting and no positive market value, the full add-on is kept', () => {
     const [a] = psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true);
     expect(a.ngr).toBe(1);
-    expect(a.exposure).toBe(65); // max(-15 + 80, 0)
+    expect(a.exposure).toBe(80); // max(-15, 0) + 80
+    expect(psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true, true)[0].exposure).toBe(65); // variant: max(-15 + 80, 0)
   });
 });
 
@@ -140,8 +152,9 @@ describe('settlement risk', () => {
     expect(srByDate(ctx, [eur, ndf], false).size).toBe(0);
   });
 
-  it('an overnight swap cannot use CLS, so it carries settlement risk', () => {
+  it('an overnight swap is assumed to miss the CLS cut-off, so it carries settlement risk unless told otherwise', () => {
     expect(deal(s, ticket({ tenor: 'ON' })).settlement).toBe('GROSS');
+    expect(deal(s, ticket({ tenor: 'ON', settlement: 'CLS' })).settlement).toBe('CLS');
   });
 });
 
@@ -251,6 +264,5 @@ describe('check, reserve, fill', () => {
     expect(buildTrade(ctx, ticket({ amount: 60 * M }))).toHaveProperty('error');
     expect(buildTrade(ctx, ticket({ product: 'NDF' }))).toHaveProperty('error');
     expect(buildTrade(ctx, ticket({ pair: 'USDCNH', settlement: 'CLS' }))).toHaveProperty('error');
-    expect(buildTrade(ctx, ticket({ tenor: 'ON', settlement: 'CLS' }))).toHaveProperty('error');
   });
 });

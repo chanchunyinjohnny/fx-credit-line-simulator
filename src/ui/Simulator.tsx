@@ -69,6 +69,7 @@ const T = {
     closeOut: 'Close-out netting',
     payNet: 'Payment netting',
     addOn: 'Add-on, %',
+    offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
       NDF_ONLY: (p: string) => `${p} trades as an NDF only.`,
@@ -77,7 +78,6 @@ const T = {
       TOO_LARGE: () => 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.',
       NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
-      CLS_SAME_DAY: () => 'CLS cannot take a payment due today. Settle this hedge gross.',
     } as Record<TicketError, (pair: string) => string>,
   },
   zh: {
@@ -132,6 +132,7 @@ const T = {
     closeOut: '終止淨額結算',
     payNet: '支付淨額結算',
     addOn: '附加因子 %',
+    offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,
       NDF_ONLY: (p: string) => `${p} 只能做 NDF。`,
@@ -140,7 +141,6 @@ const T = {
       TOO_LARGE: () => '本流程只涵蓋單一 LP、5,000 萬美元以內的對沖。較大的單請分成幾筆輸入。',
       NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
-      CLS_SAME_DAY: () => 'CLS 不能處理當日到期的款項，這筆請用全額結算。',
     } as Record<TicketError, (pair: string) => string>,
   },
 };
@@ -192,7 +192,7 @@ function lineRows(keys: string[], label: (k: string) => string, line: (i: number
 export function Simulator({ state, dispatch }: { state: AppState; dispatch: Dispatch<Action> }) {
   const lang = useLang();
   const t = T[lang];
-  const ctx = useMemo(() => makeCtx(state), [state.businessDate, state.market, state.addOnPct]);
+  const ctx = useMemo(() => makeCtx(state), [state.businessDate, state.market, state.addOnPct, state.offsetNegativeMv]);
   const [ticket, setTicket] = useState(DEFAULT_TICKET);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -617,6 +617,10 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
           </tbody>
         </table>
       </div>
+      <label className="setting">
+        <input type="checkbox" checked={state.offsetNegativeMv ?? false} onChange={(e) => edit((d) => void (d.offsetNegativeMv = e.target.checked))} />
+        <span>{t.offset}</span>
+      </label>
     </details>
   );
 }

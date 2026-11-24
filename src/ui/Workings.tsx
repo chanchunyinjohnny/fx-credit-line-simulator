@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
+import reference from '../data/reference.json';
 import { PAIRS, PILLARS, daysBetween, spotDate, tomDate } from '../engine/calendar';
 import type { Measured } from '../engine/lines';
 import { usdPerUnit, usdRate, type FxCurve } from '../engine/market';
 import type { Ctx, TradeRisk } from '../engine/risk';
-import type { Group, ISODate, PairId, Trade } from '../engine/types';
+import type { Ccy, Group, ISODate, PairId, Trade } from '../engine/types';
 import { Calc } from './bits';
 import { amt, day, num, partyName, pct, pips, rate, shortDay, signedAmt } from './format';
 import { useLang, type Lang } from './i18n';
@@ -42,7 +43,7 @@ const T = {
     meanTitle: 'What the points mean.',
     mean: (base: string, quote: string, days: number) =>
       `Swapping ${base} for ${quote} for ${days} days is lending one currency and borrowing the other, so the far rate differs from the near rate by the interest-rate gap (covered interest parity):`,
-    parity: (q: string, b: string, days: number) => `far ÷ near = (1 + r(${q}) × t) ÷ (1 + r(${b}) × t), with t = ${days}/360`,
+    parity: (q: string, b: string, days: number, bq: number, bb: number) => `far ÷ near = (1 + r(${q}) × ${days}/${bq}) ÷ (1 + r(${b}) × ${days}/${bb})`,
     implied: (far: string, near: string, ratio: string, rUsd: string, other: string, rOther: string) =>
       `${far} ÷ ${near} = ${ratio}; with USD at ${rUsd} this implies ${other} at ${rOther}`,
     s3: 'Cash flows',
@@ -63,7 +64,12 @@ const T = {
       `Notional = ${swap ? 'far-leg ' : ''}amount at spot = ${base} ${a}${fx ? ` × ${fx}` : ''} = USD ${n}`,
     pillar: (d: string, p: string, end: string, pc: string) => `Matures ${d} → ${p} pillar (maturities up to ${end}) → add-on ${pc}`,
     addOn: (n: string, pc: string, a: string) => `Add-on = ${n} × ${pc} = USD ${a}`,
-    exposure: (mv: string, a: string, e: string) => `Exposure = max(market value + add-on, 0) = max(${mv} + ${a}, 0) = USD ${e}`,
+    exposure: (mv: string, a: string, e: string, offset: boolean) =>
+      offset ? `Exposure = max(market value + add-on, 0) = max(${mv} + ${a}, 0) = USD ${e}` : `Exposure = max(market value, 0) + add-on = max(${mv}, 0) + ${a} = USD ${e}`,
+    negative: (offset: boolean) =>
+      offset
+        ? 'The offset setting is on: a negative market value reduces the add-on. The standard method does not allow this.'
+        : 'A negative market value does not reduce the add-on: the hedge could still turn positive before it matures.',
     s6: (g: string) => `Pre-settlement risk of ${g}`,
     s6Result: (p: string, e: string, l: string) => `${p}: USD ${e} of ${l}`,
     unchanged: 'Unchanged',
@@ -72,11 +78,11 @@ const T = {
     noNetting: 'No close-out netting: exposures are added up.',
     fNgr: 'NGR = max(Σ market value, 0) ÷ Σ max(market value, 0)',
     fNet: 'net add-on = (0.4 + 0.6 × NGR) × gross add-on',
-    fExp: 'exposure = max(Σ market value + net add-on, 0)',
-    fGross: 'exposure = Σ max(market value + add-on, 0), hedge by hedge',
+    fExp: (offset: boolean) => (offset ? 'exposure = max(Σ market value + net add-on, 0)' : 'exposure = max(Σ market value, 0) + net add-on'),
+    fGross: (offset: boolean) => (offset ? 'exposure = Σ max(market value + add-on, 0), hedge by hedge' : 'exposure = Σ (max(market value, 0) + add-on), hedge by hedge'),
     ngrOne: 'no hedge has a positive market value, so NGR is taken as 1',
     netIs: (ngr: string, g: string, n: string) => `net add-on = (0.4 + 0.6 × ${ngr}) × ${g} = ${n}`,
-    expIs: (s: string, n: string, e: string) => `exposure = max(${s} + ${n}, 0) = USD ${e}`,
+    expIs: (s: string, n: string, e: string, offset: boolean) => (offset ? `exposure = max(${s} + ${n}, 0) = USD ${e}` : `exposure = max(${s}, 0) + ${n} = USD ${e}`),
     psrHead: ['Pillar', 'Hedges counted', 'Σ market value', 'Gross add-on', 'NGR', 'Net add-on', 'Exposure', 'Line'],
     s7: (g: string) => `Settlement risk of ${g}`,
     atMost: (x: string) => `USD ${x} at most`,
@@ -117,7 +123,7 @@ const T = {
     meanTitle: '掉期點代表什麼。',
     mean: (base: string, quote: string, days: number) =>
       `${base} 與 ${quote} 掉期 ${days} 日，等於借出一種貨幣、借入另一種，所以遠端與近端匯率的差距就是兩者的利差（拋補利率平價）：`,
-    parity: (q: string, b: string, days: number) => `遠端 ÷ 近端 = (1 + r(${q}) × t) ÷ (1 + r(${b}) × t)，t = ${days}/360`,
+    parity: (q: string, b: string, days: number, bq: number, bb: number) => `遠端 ÷ 近端 = (1 + r(${q}) × ${days}/${bq}) ÷ (1 + r(${b}) × ${days}/${bb})`,
     implied: (far: string, near: string, ratio: string, rUsd: string, other: string, rOther: string) =>
       `${far} ÷ ${near} = ${ratio}；美元利率 ${rUsd} 時，隱含 ${other} 利率 ${rOther}`,
     s3: '現金流',
@@ -137,7 +143,9 @@ const T = {
       `名義本金 = ${swap ? '遠端' : ''}金額按即期折算 = ${base} ${a}${fx ? ` × ${fx}` : ''} = USD ${n}`,
     pillar: (d: string, p: string, end: string, pc: string) => `${d} 到期 → ${p} 期限檔（到期日不遲於 ${end}）→ 附加因子 ${pc}`,
     addOn: (n: string, pc: string, a: string) => `附加金額 = ${n} × ${pc} = USD ${a}`,
-    exposure: (mv: string, a: string, e: string) => `風險敞口 = max(市值 + 附加金額, 0) = max(${mv} + ${a}, 0) = USD ${e}`,
+    exposure: (mv: string, a: string, e: string, offset: boolean) =>
+      offset ? `風險敞口 = max(市值 + 附加金額, 0) = max(${mv} + ${a}, 0) = USD ${e}` : `風險敞口 = max(市值, 0) + 附加金額 = max(${mv}, 0) + ${a} = USD ${e}`,
+    negative: (offset: boolean) => (offset ? '已開啟抵銷設定：負市值會減少附加金額。標準方法不允許這樣做。' : '負市值不能減少附加金額：到期前市值仍可能轉正。'),
     s6: (g: string) => `${g}的交割前風險`,
     s6Result: (p: string, e: string, l: string) => `${p}：USD ${e} / ${l}`,
     unchanged: '不變',
@@ -146,11 +154,11 @@ const T = {
     noNetting: '不適用終止淨額結算：各筆風險敞口直接相加。',
     fNgr: 'NGR = max(Σ 市值, 0) ÷ Σ max(市值, 0)',
     fNet: '淨附加金額 = (0.4 + 0.6 × NGR) × 附加金額總和',
-    fExp: '風險敞口 = max(Σ 市值 + 淨附加金額, 0)',
-    fGross: '風險敞口 = Σ max(市值 + 附加金額, 0)，逐筆計算',
+    fExp: (offset: boolean) => (offset ? '風險敞口 = max(Σ 市值 + 淨附加金額, 0)' : '風險敞口 = max(Σ 市值, 0) + 淨附加金額'),
+    fGross: (offset: boolean) => (offset ? '風險敞口 = Σ max(市值 + 附加金額, 0)，逐筆計算' : '風險敞口 = Σ (max(市值, 0) + 附加金額)，逐筆計算'),
     ngrOne: '沒有一筆市值為正，NGR 取 1',
     netIs: (ngr: string, g: string, n: string) => `淨附加金額 = (0.4 + 0.6 × ${ngr}) × ${g} = ${n}`,
-    expIs: (s: string, n: string, e: string) => `風險敞口 = max(${s} + ${n}, 0) = USD ${e}`,
+    expIs: (s: string, n: string, e: string, offset: boolean) => (offset ? `風險敞口 = max(${s} + ${n}, 0) = USD ${e}` : `風險敞口 = max(${s}, 0) + ${n} = USD ${e}`),
     psrHead: ['期限檔', '計入筆數', 'Σ 市值', '附加金額總和', 'NGR', '淨附加金額', '風險敞口', '額度'],
     s7: (g: string) => `${g}的結算風險`,
     atMost: (x: string) => `最高 USD ${x}`,
@@ -230,20 +238,22 @@ function ImpliedRate({ ctx, trade, curve, lang }: { ctx: Ctx; trade: Trade; curv
   const startRate = trade.legs.length > 1 ? trade.legs[0].rate : ctx.market.pairs[trade.pair].spot;
   const days = daysBetween(startDate, far.date);
   if (days <= 0) return null;
-  const time = days / 360;
+  const basis = reference.dayCount as Record<Ccy, number>; // money-market day count: 360 or 365
   const rUsd = usdRate(ctx.market, days) / 100;
+  const usdGrowth = 1 + (rUsd * days) / basis.USD;
   const usdIsQuote = info.quote === 'USD';
-  // Covered interest parity: far / near = (1 + r_quote t) / (1 + r_base t)
+  const other = usdIsQuote ? info.base : info.quote;
+  // Covered interest parity: far / near = (1 + r_quote t_quote) / (1 + r_base t_base)
   const ratio = far.rate / startRate;
-  const rOther = usdIsQuote ? ((1 + rUsd * time) / ratio - 1) / time : ((1 + rUsd * time) * ratio - 1) / time;
+  const rOther = ((usdIsQuote ? usdGrowth / ratio : usdGrowth * ratio) - 1) * (basis[other] / days);
   return (
     <div className="aside-note">
       <p>
         <strong>{t.meanTitle}</strong> {t.mean(info.base, info.quote, days)}
       </p>
-      <Calc>{t.parity(info.quote, info.base, days)}</Calc>
+      <Calc>{t.parity(info.quote, info.base, days, basis[info.quote], basis[info.base])}</Calc>
       <Calc>
-        {t.implied(rate(trade.pair, far.rate), rate(trade.pair, startRate), ratio.toFixed(6), pct(rUsd * 100), usdIsQuote ? info.base : info.quote, pct(rOther * 100))}
+        {t.implied(rate(trade.pair, far.rate), rate(trade.pair, startRate), ratio.toFixed(6), pct(rUsd * 100), other, pct(rOther * 100))}
       </Calc>
     </div>
   );
@@ -359,7 +369,8 @@ export function Workings({ ctx, trade, risk, measured, group, isNew }: Props) {
             <Calc>{t.notional(isSwap, info.base, amt(Math.abs(far.base)), info.base === 'USD' ? null : baseUsd.toFixed(info.dp), amt(risk.notionalUsd))}</Calc>
             <Calc>{t.pillar(shortDay(risk.maturity, lang), PILLARS[own], shortDay(ctx.pillarEnds[own], lang), pct(risk.addOnPct))}</Calc>
             <Calc>{t.addOn(amt(risk.notionalUsd), pct(risk.addOnPct), amt(risk.addOn))}</Calc>
-            <Calc>{t.exposure(signedAmt(risk.mv), amt(risk.addOn), amt(risk.exposure))}</Calc>
+            <Calc>{t.exposure(signedAmt(risk.mv), amt(risk.addOn), amt(risk.exposure), ctx.offsetNegativeMv)}</Calc>
+            {risk.mv < -0.5 && <p className="note">{t.negative(ctx.offsetNegativeMv)}</p>}
           </>
         )}
       </Step>
@@ -372,10 +383,10 @@ export function Workings({ ctx, trade, risk, measured, group, isNew }: Props) {
           <>
             <Calc>{t.fNgr}</Calc>
             <Calc>{t.fNet}</Calc>
-            <Calc>{t.fExp}</Calc>
+            <Calc>{t.fExp(ctx.offsetNegativeMv)}</Calc>
           </>
         ) : (
-          <Calc>{t.fGross}</Calc>
+          <Calc>{t.fGross(ctx.offsetNegativeMv)}</Calc>
         )}
         {agg && group.closeOutNetting && (
           <div className="calc-group">
@@ -383,7 +394,7 @@ export function Workings({ ctx, trade, risk, measured, group, isNew }: Props) {
               {PILLARS[own]}: {agg.sumPositiveMv > 0 ? `NGR = max(${signedAmt(agg.sumMv)}, 0) ÷ ${amt(agg.sumPositiveMv)} = ${agg.ngr.toFixed(4)}` : t.ngrOne}
             </Calc>
             <Calc>{t.netIs(agg.ngr.toFixed(4), amt(agg.addOnGross), amt(agg.addOnNet))}</Calc>
-            <Calc>{t.expIs(signedAmt(agg.sumMv), amt(agg.addOnNet), amt(agg.exposure))}</Calc>
+            <Calc>{t.expIs(signedAmt(agg.sumMv), amt(agg.addOnNet), amt(agg.exposure), ctx.offsetNegativeMv)}</Calc>
           </div>
         )}
         <div className="table-wrap">

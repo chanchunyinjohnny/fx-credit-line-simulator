@@ -58,7 +58,7 @@ function Cell({ row, label, noLine, overBy }: { row: BoardRow; label: string; no
 export function Lines({ state }: { state: AppState }) {
   const lang = useLang();
   const t = T[lang];
-  const ctx = useMemo(() => makeCtx(state), [state.businessDate, state.market, state.addOnPct]);
+  const ctx = useMemo(() => makeCtx(state), [state.businessDate, state.market, state.addOnPct, state.offsetNegativeMv]);
   const boards = state.groups.map((g) => ({ g, b: board(ctx, state, g.id) }));
   const name = (g: Group) => partyName(g.name, lang);
   /** 'Bank A London (360T, FXGO) · Bank A Frankfurt (360T)' */

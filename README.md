@@ -25,7 +25,7 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 | Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, and the open questions |
 
-Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time.
+Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time, and lists every assumption the program makes with its status: verified against a public source, a simplification, invented, or still to be confirmed.
 
 ## Method
 
@@ -33,9 +33,9 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | --- | --- |
 | Outright rate | spot + swap points, interpolated linearly by calendar days between quoted tenors |
 | Market value of a leg | amount × (today's rate for its date − dealt rate) × USD discount factor |
-| Exposure of one hedge | max(market value + notional × add-on %, 0), on the far leg's notional and maturity for a swap |
+| Exposure of one hedge | max(market value, 0) + notional × add-on %, on the far leg's notional and maturity for a swap. A setting switches to an internal variant in which a negative value reduces the add-on |
 | Pre-settlement risk, no netting | sum of each hedge's exposure, per pillar |
-| Pre-settlement risk, close-out netting | max(Σ market value + net add-on, 0), with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
+| Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
 | Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs |
 | Headroom | credit line − earlier days' hedges − today's fills − reservations |
 

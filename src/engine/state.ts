@@ -8,7 +8,7 @@ import type { AppState, ISODate, Ticket, Trade } from './types';
 export const MAX_AMOUNT_USD = 50_000_000;
 
 /** Why a ticket cannot be dealt. The screen turns the code into words. */
-export type TicketError = 'USE_SWAP_OR_FORWARD' | 'NDF_ONLY' | 'TENOR' | 'AMOUNT' | 'TOO_LARGE' | 'NO_TOM_NEXT' | 'NOT_CLS_PAIR' | 'CLS_SAME_DAY';
+export type TicketError = 'USE_SWAP_OR_FORWARD' | 'NDF_ONLY' | 'TENOR' | 'AMOUNT' | 'TOO_LARGE' | 'NO_TOM_NEXT' | 'NOT_CLS_PAIR';
 
 /** Turn a ticket into a trade dealt at today's mid rates, or say why it cannot be dealt. */
 export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: TicketError } {
@@ -32,11 +32,11 @@ export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: TicketErr
         ]
       : [{ date: dates.far, base: sign * ticket.amount, rate: curve.forward(dates.far) }];
 
-  // CLS needs both currencies to be eligible and cannot take a same-day payment.
+  // CLS needs both currencies to be eligible. Instructions are due by 00:00 CET on the value date, so a
+  // payment due today has normally missed the cut-off: such a hedge is assumed to settle gross unless told otherwise.
   const auto = ticket.product === 'NDF' ? 'CASH' : pair.cls && legs[0].date > ctx.t0 ? 'CLS' : 'GROSS';
   const settlement = ticket.product === 'NDF' || ticket.settlement === 'AUTO' ? auto : ticket.settlement;
   if (settlement === 'CLS' && !pair.cls) return { error: 'NOT_CLS_PAIR' };
-  if (settlement === 'CLS' && legs[0].date <= ctx.t0) return { error: 'CLS_SAME_DAY' };
 
   return {
     id: 'new',
