@@ -6,7 +6,7 @@ A browser-only simulator of counterparty credit lines for FX hedges: FX swap, ou
 
 Enter a hedge, see what it would use of each credit line and why, then send it, fill it or reject it. Every number opens to show its formula with the actual figures substituted.
 
-All counterparties, credit lines, add-ons and prices are invented.
+All counterparties, credit lines, add-ons and prices are invented. The interface comes in English and Traditional Chinese; switch with EN / 中文 at the top right.
 
 ## What it shows
 
@@ -22,7 +22,7 @@ All counterparties, credit lines, add-ons and prices are invented.
 | --- | --- |
 | Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data and credit lines open on demand |
 | Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
-| Design | The hedging flow as first drawn and as proposed, what the review found, and the open questions |
+| Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, and the open questions |
 
 ## Method
 
@@ -54,7 +54,7 @@ Pre-settlement and settlement risk are credit policy rather than pricing, so no 
 ```sh
 npm install
 npm run dev      # local server
-npm test         # 28 tests
+npm test         # 29 tests
 npm run build    # static site in dist/
 npm run oracle   # regenerate the QuantLib reference values (needs uv)
 ```

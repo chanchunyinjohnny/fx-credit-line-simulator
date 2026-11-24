@@ -5,6 +5,7 @@ import { defaultState } from '../src/engine/defaults';
 import { board, checkTrade } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
 import { makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
+import { rollSummary } from '../src/engine/roll';
 import { buildTrade, reducer } from '../src/engine/state';
 import type { AppState, PairId, Tenor, Ticket, Trade } from '../src/engine/types';
 
@@ -202,6 +203,22 @@ describe('check, reserve, fill', () => {
     expect(board(makeCtx(s), s, 'E').sr.map((r) => r.key)).toEqual([near, far]);
     while (s.businessDate <= near) s = reducer(s, { type: 'NEXT_DAY' });
     expect(board(makeCtx(s), s, 'E').sr.map((r) => r.key)).toEqual([far]);
+  });
+
+  it('summarises what a new day changed', () => {
+    const empty = defaultState();
+    expect(rollSummary(empty, reducer(empty, { type: 'NEXT_DAY' }))).toMatchObject({ date: '2026-12-01', lapsed: 0, groups: [] });
+
+    let s = reducer(defaultState(), { type: 'SEND', ticket: ticket({ pair: 'USDCNH', amount: 15 * M, lpId: 'E-360T' }) });
+    s = reducer(s, { type: 'FILL', id: 'H1' });
+    s = reducer(s, { type: 'SEND', ticket: first }); // left in flight
+    for (let i = 0; i < 2; i++) s = reducer(s, { type: 'NEXT_DAY' }); // now 2 Dec, the near value date
+    const sum = rollSummary(s, reducer(s, { type: 'NEXT_DAY' }));
+    expect(sum.groups).toHaveLength(1);
+    expect(sum.groups[0].id).toBe('E');
+    expect(sum.groups[0].srReleased).toBeCloseTo(15 * M, 6); // the near-leg receivable has settled
+    expect(sum.groups[0].psrAfter).toBeGreaterThan(0);
+    expect(rollSummary(reducer(defaultState(), { type: 'SEND', ticket: first }), defaultState()).lapsed).toBe(1);
   });
 
   it('refuses tickets outside the flow', () => {

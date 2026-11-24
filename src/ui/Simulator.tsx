@@ -2,10 +2,11 @@ import { useMemo, useState, type Dispatch } from 'react';
 import { OUTRIGHT_TENORS, PAIRS, PAIR_IDS, PILLARS, SWAP_TENORS } from '../engine/calendar';
 import { board, checkTrade, groupOf, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
 import { makeCtx, valueTrade, type Ctx } from '../engine/risk';
-import { buildTrade, type Action } from '../engine/state';
+import { buildTrade, type Action, type TicketError } from '../engine/state';
 import type { AppState, Group, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
 import { NumInput, Status } from './bits';
-import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, rate, shortDay, signedMio } from './format';
+import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, partyName, rate, shortDay, signedMio } from './format';
+import { useLang, type Lang } from './i18n';
 import { Workings } from './Workings';
 
 const M = 1_000_000;
@@ -13,15 +14,149 @@ const DEFAULT_TICKET: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', a
 const POINT_TENORS: Tenor[] = ['ON', 'TN', 'SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
 const RATE_TENORS: RateTenor[] = ['ON', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
 
+const T = {
+  en: {
+    product: 'Product',
+    pair: 'Pair',
+    direction: 'Direction',
+    amount: (ccy: string) => `${ccy} mio`,
+    tenor: 'Tenor',
+    settlement: 'Settlement',
+    standard: (s: string) => `Standard${s ? `: ${s}` : ''}`,
+    sendTo: 'Send to',
+    lpGroup: 'Liquidity provider. A tick means it has room for this hedge.',
+    hasRoom: ', has room',
+    noRoom: ', no room',
+    fits: 'Fits',
+    blocked: 'Blocked',
+    adds: (psr: string, sr: string | null, g: string) =>
+      `Adds USD ${psr} mio of pre-settlement risk${sr ? ` and up to ${sr} mio of settlement risk a day` : ''} to ${g}.`,
+    psrOver: (k: string, a: string, l: string) => `Pre-settlement risk at ${k} would reach ${a} against a line of ${l}.`,
+    srOver: (d: string, a: string, l: string) => `Settlement risk on ${d} would reach ${a} against a line of ${l}.`,
+    onlyReservation: ' It would fit without the hedge in flight: the reservation is what stops both from filling.',
+    at: (dates: string, rates: string) => `${dates} at ${rates}`,
+    send: 'Send and reserve',
+    psr: 'Pre-settlement risk',
+    sr: 'Settlement risk',
+    unit: 'USD mio',
+    legend: ['In use', 'Reserved', 'This hedge'],
+    of: (a: string, l: string) => `${a} of ${l}`,
+    overBy: (x: string) => `over by ${x}`,
+    barLabel: (k: string, a: string, l: string, over: boolean) => `${k}: ${a} of ${l} USD mio${over ? ', over the line' : ''}`,
+    srNone: (g: string) => `none with ${g}.`,
+    viaCls: 'This hedge settles through CLS.',
+    viaCash: 'An NDF pays one net amount.',
+    workings: 'Workings: how each number is calculated',
+    figures: (g: string) => `Figures: where ${g}'s lines stand today`,
+    figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'This hedge', 'Headroom after'],
+    psrRow: (k: string) => `PSR ${k}`,
+    srRow: (k: string) => `SR ${k}`,
+    sent: 'Sent hedges',
+    sentHead: ['Hedge', 'Status', 'Exposure, USD'],
+    status: { IN_FLIGHT: 'In flight', FILLED: 'Filled', REJECTED: 'Rejected', EXPIRED: 'Lapsed', SETTLED: 'Settled' },
+    mio: 'mio',
+    fill: 'Fill',
+    reject: 'Reject',
+    workingsBtn: 'Workings',
+    valued: (id: string) => `${id}, valued today`,
+    market: 'Market data: change a rate and open hedges are revalued',
+    marketHint: 'Spot and swap points set the rates of new hedges and the market value of filled ones. Raise a spot rate and watch the bars above move.',
+    points: 'Swap points, pips',
+    spot: 'Spot',
+    usdRate: 'USD rate, %',
+    lines: 'Credit lines and add-ons, set by the credit owner',
+    psrLine: (p: string) => `PSR ${p}`,
+    srLine: 'SR per day',
+    closeOut: 'Close-out netting',
+    payNet: 'Payment netting',
+    addOn: 'Add-on, %',
+    errors: {
+      USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
+      NDF_ONLY: (p: string) => `${p} trades as an NDF only.`,
+      TENOR: () => 'This tenor is not available for this product.',
+      AMOUNT: () => 'Enter an amount.',
+      TOO_LARGE: () => 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.',
+      NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
+      NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
+      CLS_SAME_DAY: () => 'CLS cannot take a payment due today. Settle this hedge gross.',
+    } as Record<TicketError, (pair: string) => string>,
+  },
+  zh: {
+    product: '產品',
+    pair: '貨幣對',
+    direction: '方向',
+    amount: (ccy: string) => `${ccy} 百萬`,
+    tenor: '期限',
+    settlement: '結算方式',
+    standard: (s: string) => `預設${s ? `：${s}` : ''}`,
+    sendTo: '送往',
+    lpGroup: 'LP。打勾代表有足夠額度做這筆對沖。',
+    hasRoom: '，額度足夠',
+    noRoom: '，額度不足',
+    fits: '額度足夠',
+    blocked: '額度不足',
+    adds: (psr: string, sr: string | null, g: string) => `${g}的交割前風險增加 ${psr} 百萬美元${sr ? `，結算風險每日最多增加 ${sr} 百萬美元` : ''}。`,
+    psrOver: (k: string, a: string, l: string) => `${k} 期限檔的交割前風險將達 ${a}，額度只有 ${l}。`,
+    srOver: (d: string, a: string, l: string) => `${d} 的結算風險將達 ${a}，額度只有 ${l}。`,
+    onlyReservation: '若沒有在途的那一筆，這筆本來放得進：正是預佔擋住了兩筆同時成交。',
+    at: (dates: string, rates: string) => `${dates}，匯率 ${rates}`,
+    send: '送出並預佔額度',
+    psr: '交割前風險',
+    sr: '結算風險',
+    unit: '百萬美元',
+    legend: ['已用', '預佔', '本筆'],
+    of: (a: string, l: string) => `${a} / ${l}`,
+    overBy: (x: string) => `超出 ${x}`,
+    barLabel: (k: string, a: string, l: string, over: boolean) => `${k}：${a} / ${l} 百萬美元${over ? '，超出額度' : ''}`,
+    srNone: (g: string) => `${g}沒有。`,
+    viaCls: '本筆經 CLS 同步交收。',
+    viaCash: 'NDF 只支付一筆差額。',
+    workings: '計算過程：每個數字怎樣算出來',
+    figures: (g: string) => `數字明細：${g}今日的額度使用情況`,
+    figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '本筆', '交易後可用額度'],
+    psrRow: (k: string) => `交割前 ${k}`,
+    srRow: (k: string) => `結算 ${k}`,
+    sent: '已送出的對沖',
+    sentHead: ['對沖', '狀態', '風險敞口（美元）'],
+    status: { IN_FLIGHT: '在途', FILLED: '已成交', REJECTED: '已拒絕', EXPIRED: '已失效', SETTLED: '已交收' },
+    mio: '百萬',
+    fill: '成交',
+    reject: '拒絕',
+    workingsBtn: '計算過程',
+    valued: (id: string) => `${id}，按今日市場重估`,
+    market: '市場數據：改動匯率，未到期的對沖即時重估',
+    marketHint: '即期和掉期點決定新對沖的成交匯率，以及已成交對沖的市值。調高一個即期匯率，上面的額度條就會變動。',
+    points: '掉期點（點）',
+    spot: '即期',
+    usdRate: '美元利率 %',
+    lines: '授信額度與附加因子（由授信管理部門設定）',
+    psrLine: (p: string) => `交割前 ${p}`,
+    srLine: '結算（每日）',
+    closeOut: '終止淨額結算',
+    payNet: '支付淨額結算',
+    addOn: '附加因子 %',
+    errors: {
+      USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,
+      NDF_ONLY: (p: string) => `${p} 只能做 NDF。`,
+      TENOR: () => '這個產品沒有這個期限。',
+      AMOUNT: () => '請輸入金額。',
+      TOO_LARGE: () => '本流程只涵蓋單一 LP、5,000 萬美元以內的對沖。較大的單請分成幾筆輸入。',
+      NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
+      NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
+      CLS_SAME_DAY: () => 'CLS 不能處理當日到期的款項，這筆請用全額結算。',
+    } as Record<TicketError, (pair: string) => string>,
+  },
+};
+
 function withProduct(t: Ticket, product: Product): Ticket {
   const pair = product === 'NDF' ? 'USDTWD' : PAIRS[t.pair].deliverable ? t.pair : 'EURUSD';
   const tenors = product === 'SWAP' ? SWAP_TENORS : OUTRIGHT_TENORS;
   return { ...t, product, pair, tenor: tenors.includes(t.tenor) ? t.tenor : '3M', settlement: 'AUTO' };
 }
 
-const lpLabel = (s: AppState, lpId: string) => {
+const lpLabel = (s: AppState, lpId: string, lang: Lang) => {
   const lp = s.lps.find((l) => l.id === lpId)!;
-  return `${lp.name} · ${lp.channel}`;
+  return `${partyName(lp.name, lang)} · ${lp.channel}`;
 };
 
 /** One credit line as the screen shows it: what is in use, what this hedge adds, what is left. */
@@ -37,28 +172,29 @@ interface LineRow {
   ok: boolean;
 }
 
-function lineRows(keys: string[], label: (k: string) => string, line: number | ((i: number) => number), b: BoardRow[], c?: CheckRow[]): LineRow[] {
+function lineRows(keys: string[], label: (k: string) => string, line: (i: number) => number, b: BoardRow[], c?: CheckRow[]): LineRow[] {
   return keys.map((key, i) => {
     const br = b.find((r) => r.key === key);
     const cr = c?.find((r) => r.key === key);
     const before = br?.used ?? 0;
     const after = cr ? cr.after : before;
-    const max = typeof line === 'number' ? line : line(i);
     return {
       key,
       label: label(key),
-      line: max,
+      line: line(i),
       board: br,
       used: (br?.earlier ?? 0) + (br?.today ?? 0),
       reserved: br?.reserved ?? 0,
       hedge: after - before,
       after,
-      ok: cr ? cr.ok : after <= max + 0.5,
+      ok: cr ? cr.ok : after <= line(i) + 0.5,
     };
   });
 }
 
 export function Simulator({ state, dispatch }: { state: AppState; dispatch: Dispatch<Action> }) {
+  const lang = useLang();
+  const t = T[lang];
   const ctx = useMemo(() => makeCtx(state), [state.businessDate, state.market, state.addOnPct]);
   const [ticket, setTicket] = useState(DEFAULT_TICKET);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -67,23 +203,24 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
   const trade = 'error' in built ? null : built;
   const check = trade ? checkTrade(ctx, state, trade) : null;
   const group = groupOf(state, ticket.lpId);
+  const groupName = partyName(group.name, lang);
   const b = board(ctx, state, group.id);
   const fits = (lpId: string) => {
-    const t = buildTrade(ctx, { ...ticket, lpId });
-    return 'error' in t ? null : checkTrade(ctx, state, t).ok;
+    const other = buildTrade(ctx, { ...ticket, lpId });
+    return 'error' in other ? null : checkTrade(ctx, state, other).ok;
   };
 
   const psr = lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, check?.psr);
   const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(check?.sr.map((r) => r.key) ?? [])])].sort();
-  const sr = lineRows(srKeys, shortDay, group.srLine, b.sr, check?.sr);
+  const sr = lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, check?.sr);
 
   return (
     <>
       <section className="card">
         <TicketRow ticket={ticket} onChange={setTicket} ctx={ctx} />
         <div className="lp-row">
-          <span className="label">Send to</span>
-          <div className="chips" role="group" aria-label="Liquidity provider. A tick means it has room for this hedge.">
+          <span className="label">{t.sendTo}</span>
+          <div className="chips" role="group" aria-label={t.lpGroup}>
             {state.lps.map((lp) => {
               const ok = fits(lp.id);
               return (
@@ -93,8 +230,8 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
                       {ok ? '✓' : '✕'}
                     </span>
                   )}
-                  {lp.name} · {lp.channel}
-                  <span className="sr-only">{ok === null ? '' : ok ? ', has room' : ', no room'}</span>
+                  {partyName(lp.name, lang)} · {lp.channel}
+                  <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
                 </button>
               );
             })}
@@ -105,31 +242,32 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
       <section className="card">
         {'error' in built ? (
           <p className="alert" role="alert">
-            {built.error}
+            {t.errors[built.error](PAIRS[ticket.pair].label)}
           </p>
         ) : (
           <Verdict trade={trade!} check={check!} onSend={() => dispatch({ type: 'SEND', ticket })} />
         )}
 
-        <LineBars title="Pre-settlement risk" zh="交割前風險" group={group} rows={psr} legend />
+        <LineBars title={t.psr} group={groupName} rows={psr} legend />
         {sr.length > 0 ? (
-          <LineBars title="Settlement risk" zh="結算風險" group={group} rows={sr} />
+          <LineBars title={t.sr} group={groupName} rows={sr} />
         ) : (
           <p className="quiet">
-            <strong>Settlement risk</strong> <span className="zh" lang="zh-Hant">結算風險</span>: none with {group.name}.{' '}
-            {trade?.settlement === 'CLS' && 'This hedge settles through CLS.'}
-            {trade?.settlement === 'CASH' && 'An NDF pays one net amount.'}
+            <strong>{t.sr}</strong>
+            {lang === 'zh' ? '：' : ': '}
+            {t.srNone(groupName)} {trade?.settlement === 'CLS' && t.viaCls}
+            {trade?.settlement === 'CASH' && t.viaCash}
           </p>
         )}
 
         {check && trade && (
           <details className="more">
-            <summary>Workings: how each number is calculated</summary>
+            <summary>{t.workings}</summary>
             <Workings ctx={ctx} trade={trade} risk={check.risk} measured={check.after} group={check.group} isNew />
           </details>
         )}
         <details className="more">
-          <summary>Figures: where {group.name}'s lines stand today</summary>
+          <summary>{t.figures(groupName)}</summary>
           <FiguresTable psr={psr} sr={sr} />
         </details>
       </section>
@@ -146,6 +284,8 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
 
 // ------------------------------------------------------------------ ticket
 function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ticket) => void; ctx: Ctx }) {
+  const lang = useLang();
+  const t = T[lang];
   const info = PAIRS[ticket.pair];
   const tenors = ticket.product === 'SWAP' ? SWAP_TENORS : OUTRIGHT_TENORS;
   const pairs = PAIR_IDS.filter((id) => PAIRS[id].deliverable === (ticket.product !== 'NDF'));
@@ -153,17 +293,17 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
   return (
     <div className="ticket">
       <div className="field">
-        <span className="label">Product</span>
-        <div className="segmented" role="group" aria-label="Product">
+        <span className="label">{t.product}</span>
+        <div className="segmented" role="group" aria-label={t.product}>
           {(['SWAP', 'FORWARD', 'NDF'] as Product[]).map((p) => (
             <button key={p} type="button" aria-pressed={ticket.product === p} onClick={() => onChange(withProduct(ticket, p))}>
-              {PRODUCT_LABEL[p]}
+              {PRODUCT_LABEL[lang][p]}
             </button>
           ))}
         </div>
       </div>
       <label className="field">
-        <span className="label">Pair</span>
+        <span className="label">{t.pair}</span>
         <select value={ticket.pair} onChange={(e) => onChange({ ...ticket, pair: e.target.value as Ticket['pair'], settlement: 'AUTO' })}>
           {pairs.map((id) => (
             <option key={id} value={id}>
@@ -173,33 +313,33 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
         </select>
       </label>
       <label className="field">
-        <span className="label">Direction</span>
+        <span className="label">{t.direction}</span>
         <select value={ticket.side} onChange={(e) => onChange({ ...ticket, side: e.target.value as Ticket['side'] })}>
-          <option value="BUY">{direction({ ...ticket, side: 'BUY' })}</option>
-          <option value="SELL">{direction({ ...ticket, side: 'SELL' })}</option>
+          <option value="BUY">{direction({ ...ticket, side: 'BUY' }, lang)}</option>
+          <option value="SELL">{direction({ ...ticket, side: 'SELL' }, lang)}</option>
         </select>
       </label>
       <label className="field field-narrow">
-        <span className="label">{info.base} mio</span>
-        <NumInput label={`Amount in ${info.base} millions`} value={ticket.amount / M} min={0} onChange={(v) => onChange({ ...ticket, amount: v * M })} />
+        <span className="label">{t.amount(info.base)}</span>
+        <NumInput label={t.amount(info.base)} value={ticket.amount / M} min={0} onChange={(v) => onChange({ ...ticket, amount: v * M })} />
       </label>
       <label className="field field-narrow">
-        <span className="label">Tenor</span>
+        <span className="label">{t.tenor}</span>
         <select value={ticket.tenor} onChange={(e) => onChange({ ...ticket, tenor: e.target.value as Tenor, settlement: 'AUTO' })}>
-          {tenors.map((t) => (
-            <option key={t} value={t}>
-              {t}
+          {tenors.map((x) => (
+            <option key={x} value={x}>
+              {x}
             </option>
           ))}
         </select>
       </label>
       {ticket.product !== 'NDF' && (
         <label className="field">
-          <span className="label">Settlement</span>
+          <span className="label">{t.settlement}</span>
           <select value={ticket.settlement} onChange={(e) => onChange({ ...ticket, settlement: e.target.value as Ticket['settlement'] })}>
-            <option value="AUTO">Standard{'error' in auto ? '' : `: ${SETTLEMENT_LABEL[auto.settlement]}`}</option>
-            <option value="CLS">{SETTLEMENT_LABEL.CLS}</option>
-            <option value="GROSS">{SETTLEMENT_LABEL.GROSS}</option>
+            <option value="AUTO">{t.standard('error' in auto ? '' : SETTLEMENT_LABEL[lang][auto.settlement])}</option>
+            <option value="CLS">{SETTLEMENT_LABEL[lang].CLS}</option>
+            <option value="GROSS">{SETTLEMENT_LABEL[lang].GROSS}</option>
           </select>
         </label>
       )}
@@ -208,79 +348,76 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
 }
 
 // ----------------------------------------------------------------- verdict
-/** Why the check failed, in one sentence. */
-function reason(c: CheckResult) {
-  const p = c.psr.find((r) => !r.ok);
-  if (p) return `Pre-settlement risk at ${p.key} would reach ${mio(p.after)} against a line of ${mio(p.line)}.`;
-  const s = c.sr.find((r) => !r.ok)!;
-  return `Settlement risk on ${shortDay(s.key)} would reach ${mio(s.after)} against a line of ${mio(s.line)}.`;
-}
-
 function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; onSend: () => void }) {
+  const lang = useLang();
+  const t = T[lang];
   const far = trade.legs[trade.legs.length - 1];
-  const dates = trade.legs.length > 1 ? `${shortDay(trade.legs[0].date)} → ${shortDay(far.date)}` : shortDay(far.date);
+  const dates = trade.legs.length > 1 ? `${shortDay(trade.legs[0].date, lang)} → ${shortDay(far.date, lang)}` : shortDay(far.date, lang);
   const rates = trade.legs.map((l) => rate(trade.pair, l.rate)).join(' / ');
   const srAdded = Math.max(0, ...check.sr.map((r) => r.after - r.before));
+  const g = partyName(check.group.name, lang);
+  const psrFail = check.psr.find((r) => !r.ok);
+  const srFail = check.sr.find((r) => !r.ok);
+  const why = check.ok
+    ? t.adds(mio(check.risk.exposure), srAdded > 0.5 ? mio(srAdded) : null, g)
+    : psrFail
+      ? t.psrOver(psrFail.key, mio(psrFail.after), mio(psrFail.line))
+      : t.srOver(shortDay(srFail!.key, lang), mio(srFail!.after), mio(srFail!.line));
   return (
     <div className="verdict-row">
       <div>
         <p className="verdict">
-          <Status ok={check.ok}>{check.ok ? 'Fits' : 'Blocked'}</Status>
+          <Status ok={check.ok}>{check.ok ? t.fits : t.blocked}</Status>
         </p>
         <p className="verdict-why">
-          {check.ok ? `Adds USD ${mio(check.risk.exposure)} mio of pre-settlement risk${srAdded > 0.5 ? ` and up to ${mio(srAdded)} mio of settlement risk a day` : ''} to ${check.group.name}.` : reason(check)}
-          {check.blockedByReservation && ' It would fit without the hedge in flight: the reservation is what stops both from filling.'}
+          {why}
+          {check.blockedByReservation && t.onlyReservation}
         </p>
-        <p className="quiet">
-          {dates} at {rates}
-        </p>
+        <p className="quiet">{t.at(dates, rates)}</p>
       </div>
       <button type="button" className="primary" disabled={!check.ok} onClick={onSend}>
-        Send and reserve
+        {t.send}
       </button>
     </div>
   );
 }
 
 // ------------------------------------------------------------ credit lines
+const SEGMENTS = ['seg-used', 'seg-reserved', 'seg-hedge'] as const;
+
 function Bar({ row }: { row: LineRow }) {
-  const parts = (
-    [
-      ['In use', row.used, 'seg-used'],
-      ['Reserved', row.reserved, 'seg-reserved'],
-      ['This hedge', row.hedge, 'seg-hedge'],
-    ] as const
-  ).filter(([, v]) => v > 0.5);
+  const t = T[useLang()];
+  const parts = [row.used, row.reserved, row.hedge].map((v, i) => ({ v, cls: SEGMENTS[i], name: t.legend[i] })).filter((p) => p.v > 0.5);
   const total = Math.max(row.after, 0);
-  const sum = parts.reduce((s, [, v]) => s + v, 0);
+  const sum = parts.reduce((s, p) => s + p.v, 0);
   // Netting can make a part negative; the bar then shows the true total.
   const scale = sum > 0 ? total / sum : 0;
   const full = Math.max(row.line, total);
   return (
-    <div className={row.ok ? 'bar' : 'bar bar-over'} role="img" aria-label={`${row.label}: ${mio(total)} of ${mio(row.line)} USD mio${row.ok ? '' : ', over the line'}`}>
-      {full > 0 && parts.map(([name, v, cls]) => <span key={name} className={`seg ${cls}`} style={{ width: `${((v * scale) / full) * 100}%` }} title={`${name}: USD ${mio(v)} mio`} />)}
+    <div className={row.ok ? 'bar' : 'bar bar-over'} role="img" aria-label={t.barLabel(row.label, mio(total), mio(row.line), !row.ok)}>
+      {full > 0 && parts.map((p) => <span key={p.cls} className={`seg ${p.cls}`} style={{ width: `${((p.v * scale) / full) * 100}%` }} title={`${p.name}: ${mio(p.v)}`} />)}
     </div>
   );
 }
 
-function LineBars({ title, zh, group, rows, legend }: { title: string; zh: string; group: Group; rows: LineRow[]; legend?: boolean }) {
+function LineBars({ title, group, rows, legend }: { title: string; group: string; rows: LineRow[]; legend?: boolean }) {
+  const t = T[useLang()];
   return (
     <div className="lines">
       <div className="lines-head">
         <h2>
-          {title} <span className="zh" lang="zh-Hant">{zh}</span> <span className="quiet-inline">· {group.name} · USD mio</span>
+          {title}{' '}
+          <span className="quiet-inline">
+            · {group} · {t.unit}
+          </span>
         </h2>
         {legend && (
-          <ul className="legend" aria-label="Bar legend">
-            <li>
-              <span className="seg seg-used" /> In use
-            </li>
-            <li>
-              <span className="seg seg-reserved" /> Reserved
-            </li>
-            <li>
-              <span className="seg seg-hedge" /> This hedge
-            </li>
+          <ul className="legend">
+            {t.legend.map((name, i) => (
+              <li key={name}>
+                <span className={`seg ${SEGMENTS[i]}`} /> {name}
+              </li>
+            ))}
           </ul>
         )}
       </div>
@@ -288,7 +425,7 @@ function LineBars({ title, zh, group, rows, legend }: { title: string; zh: strin
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>
           <span className="line-label">{r.label}</span>
           <Bar row={r} />
-          <span className="line-figure">{r.ok ? `${mio(r.after)} of ${mio(r.line)}` : <Status ok={false}>over by {mio(r.after - r.line)}</Status>}</span>
+          <span className="line-figure">{r.ok ? t.of(mio(r.after), mio(r.line)) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</span>
         </div>
       ))}
     </div>
@@ -296,32 +433,28 @@ function LineBars({ title, zh, group, rows, legend }: { title: string; zh: strin
 }
 
 function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
+  const t = T[useLang()];
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>USD mio</th>
-            <th>Credit line</th>
-            <th>Earlier days</th>
-            <th>Initial today</th>
-            <th>Today’s fills</th>
-            <th>Reserved</th>
-            <th>This hedge</th>
-            <th>Headroom after</th>
+            {t.figHead.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {[...psr, ...sr].map((r, i) => (
             <tr key={r.key} className={i === psr.length ? 'group-start' : undefined}>
-              <td>{i < psr.length ? `PSR ${r.label}` : `SR ${r.label}`}</td>
+              <td>{i < psr.length ? t.psrRow(r.label) : t.srRow(r.label)}</td>
               <td>{mio(r.line)}</td>
               <td>{mio(r.board?.earlier ?? 0)}</td>
               <td>{mio(r.board?.initial ?? r.line)}</td>
               <td>{signedMio(r.board?.today ?? 0)}</td>
               <td>{signedMio(r.reserved)}</td>
               <td>{signedMio(r.hedge)}</td>
-              <td>{r.after <= r.line + 0.5 ? mio(r.line - r.after) : <Status ok={false}>over by {mio(r.after - r.line)}</Status>}</td>
+              <td>{r.after <= r.line + 0.5 ? mio(r.line - r.after) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</td>
             </tr>
           ))}
         </tbody>
@@ -331,55 +464,55 @@ function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
 }
 
 // ------------------------------------------------------------- sent hedges
-const STATUS_LABEL = { IN_FLIGHT: 'In flight', FILLED: 'Filled', REJECTED: 'Rejected', EXPIRED: 'Lapsed' } as const;
-
 function SentHedges(p: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action>; openId: string | null; onOpen: (id: string | null) => void }) {
+  const lang = useLang();
+  const t = T[lang];
   const { ctx, state } = p;
   if (state.trades.length === 0) return null;
-  const open = state.trades.find((t) => t.id === p.openId);
+  const open = state.trades.find((x) => x.id === p.openId);
   return (
     <section className="card">
-      <h2 className="card-title">Sent hedges</h2>
+      <h2 className="card-title">{t.sent}</h2>
       <div className="table-wrap">
         <table className="table hedges">
           <thead>
             <tr>
               <th />
-              <th>Hedge</th>
-              <th>Status</th>
-              <th>Exposure, USD</th>
+              {t.sentHead.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
               <th />
             </tr>
           </thead>
           <tbody>
-            {[...state.trades].reverse().map((t) => {
-              const far = t.legs[t.legs.length - 1];
-              const live = t.status === 'FILLED' || t.status === 'IN_FLIGHT';
-              const settled = t.status === 'FILLED' && far.date < ctx.t0;
-              const r = live && !settled ? valueTrade(ctx, t) : null;
+            {[...state.trades].reverse().map((x) => {
+              const far = x.legs[x.legs.length - 1];
+              const live = x.status === 'FILLED' || x.status === 'IN_FLIGHT';
+              const settled = x.status === 'FILLED' && far.date < ctx.t0;
+              const r = live && !settled ? valueTrade(ctx, x) : null;
               return (
-                <tr key={t.id} className={live && !settled ? undefined : 'muted-row'}>
-                  <td>{t.id}</td>
+                <tr key={x.id} className={live && !settled ? undefined : 'muted-row'}>
+                  <td>{x.id}</td>
                   <td>
-                    {direction(t)} {amt(t.amount / M)} mio {t.tenor} {t.product === 'SWAP' ? '' : PRODUCT_LABEL[t.product].toLowerCase()} · {lpLabel(state, t.lpId)}
+                    {direction(x, lang)} {amt(x.amount / M)} {t.mio} {x.tenor} {x.product === 'SWAP' ? '' : PRODUCT_LABEL[lang][x.product]} · {lpLabel(state, x.lpId, lang)}
                   </td>
-                  <td>{settled ? 'Settled' : STATUS_LABEL[t.status]}</td>
-                  <td>{r ? `${mio(r.exposure)} mio` : '–'}</td>
+                  <td>{settled ? t.status.SETTLED : t.status[x.status]}</td>
+                  <td>{r ? `${mio(r.exposure)} ${t.mio}` : '–'}</td>
                   <td>
                     <span className="row-actions">
-                      {t.status === 'IN_FLIGHT' && (
+                      {x.status === 'IN_FLIGHT' && (
                         <>
-                          <button type="button" onClick={() => p.dispatch({ type: 'FILL', id: t.id })}>
-                            Fill
+                          <button type="button" onClick={() => p.dispatch({ type: 'FILL', id: x.id })}>
+                            {t.fill}
                           </button>
-                          <button type="button" onClick={() => p.dispatch({ type: 'REJECT', id: t.id })}>
-                            Reject
+                          <button type="button" onClick={() => p.dispatch({ type: 'REJECT', id: x.id })}>
+                            {t.reject}
                           </button>
                         </>
                       )}
                       {r && (
-                        <button type="button" className="link" aria-expanded={t.id === p.openId} onClick={() => p.onOpen(t.id === p.openId ? null : t.id)}>
-                          Workings
+                        <button type="button" className="link" aria-expanded={x.id === p.openId} onClick={() => p.onOpen(x.id === p.openId ? null : x.id)}>
+                          {t.workingsBtn}
                         </button>
                       )}
                     </span>
@@ -396,12 +529,13 @@ function SentHedges(p: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action>; 
 }
 
 function ExistingWorkings({ ctx, state, trade }: { ctx: Ctx; state: AppState; trade: Trade }) {
+  const t = T[useLang()];
   const group = groupOf(state, trade.lpId);
   const { measured } = board(ctx, state, group.id);
   const risk = measured.risks.find((r) => r.trade.id === trade.id) ?? valueTrade(ctx, trade);
   return (
     <div className="detail">
-      <p className="quiet">{trade.id}, valued today</p>
+      <p className="quiet">{t.valued(trade.id)}</p>
       <Workings ctx={ctx} trade={trade} risk={risk} measured={measured} group={group} isNew={false} />
     </div>
   );
@@ -409,18 +543,20 @@ function ExistingWorkings({ ctx, state, trade }: { ctx: Ctx; state: AppState; tr
 
 // ---------------------------------------------------------------- settings
 function MarketEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<Action> }) {
+  const t = T[useLang()];
   const edit = (change: (d: AppState) => void) => dispatch({ type: 'EDIT', change });
   return (
     <details className="more">
-      <summary>Market data</summary>
+      <summary>{t.market}</summary>
+      <p className="quiet hint">{t.marketHint}</p>
       <div className="table-wrap">
         <table className="table edit-table">
           <thead>
             <tr>
-              <th>Swap points, pips</th>
-              <th>Spot</th>
-              {POINT_TENORS.map((t) => (
-                <th key={t}>{t}</th>
+              <th>{t.points}</th>
+              <th>{t.spot}</th>
+              {POINT_TENORS.map((x) => (
+                <th key={x}>{x}</th>
               ))}
             </tr>
           </thead>
@@ -429,22 +565,22 @@ function MarketEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch
               <tr key={id}>
                 <td>{PAIRS[id].label}</td>
                 <td>
-                  <NumInput label={`${PAIRS[id].label} spot`} className="wide" value={state.market.pairs[id].spot} onChange={(v) => v > 0 && edit((d) => void (d.market.pairs[id].spot = v))} />
+                  <NumInput label={`${PAIRS[id].label} ${t.spot}`} className="wide" value={state.market.pairs[id].spot} onChange={(v) => v > 0 && edit((d) => void (d.market.pairs[id].spot = v))} />
                 </td>
-                {POINT_TENORS.map((t) => (
-                  <td key={t}>
-                    <NumInput label={`${PAIRS[id].label} ${t} points`} value={state.market.pairs[id].points[t]} onChange={(v) => edit((d) => void (d.market.pairs[id].points[t] = v))} />
+                {POINT_TENORS.map((x) => (
+                  <td key={x}>
+                    <NumInput label={`${PAIRS[id].label} ${x}`} value={state.market.pairs[id].points[x]} onChange={(v) => edit((d) => void (d.market.pairs[id].points[x] = v))} />
                   </td>
                 ))}
               </tr>
             ))}
             <tr className="group-start">
-              <td>USD rate, %</td>
+              <td>{t.usdRate}</td>
               <td />
-              {POINT_TENORS.map((t) => (
-                <td key={t}>
-                  {RATE_TENORS.includes(t as RateTenor) && (
-                    <NumInput label={`USD ${t} rate`} value={state.market.usdRates[t as RateTenor]} onChange={(v) => edit((d) => void (d.market.usdRates[t as RateTenor] = v))} />
+              {POINT_TENORS.map((x) => (
+                <td key={x}>
+                  {RATE_TENORS.includes(x as RateTenor) && (
+                    <NumInput label={`${t.usdRate} ${x}`} value={state.market.usdRates[x as RateTenor]} onChange={(v) => edit((d) => void (d.market.usdRates[x as RateTenor] = v))} />
                   )}
                 </td>
               ))}
@@ -457,48 +593,51 @@ function MarketEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch
 }
 
 function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<Action> }) {
+  const lang = useLang();
+  const t = T[lang];
   const edit = (change: (d: AppState) => void) => dispatch({ type: 'EDIT', change });
+  const name = (g: Group) => partyName(g.name, lang);
   return (
     <details className="more">
-      <summary>Credit lines and add-ons</summary>
+      <summary>{t.lines}</summary>
       <div className="table-wrap">
         <table className="table edit-table">
           <thead>
             <tr>
-              <th>USD mio</th>
+              <th>{t.unit}</th>
               {PILLARS.map((p) => (
-                <th key={p}>PSR {p}</th>
+                <th key={p}>{t.psrLine(p)}</th>
               ))}
-              <th>SR per day</th>
-              <th>Close-out netting</th>
-              <th>Payment netting</th>
+              <th>{t.srLine}</th>
+              <th>{t.closeOut}</th>
+              <th>{t.payNet}</th>
             </tr>
           </thead>
           <tbody>
             {state.groups.map((g, gi) => (
               <tr key={g.id}>
-                <td>{g.name}</td>
+                <td>{name(g)}</td>
                 {PILLARS.map((p, pi) => (
                   <td key={p}>
-                    <NumInput label={`${g.name} PSR line ${p}`} value={g.psrLines[pi] / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].psrLines[pi] = v * M))} />
+                    <NumInput label={`${name(g)} ${t.psrLine(p)}`} value={g.psrLines[pi] / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].psrLines[pi] = v * M))} />
                   </td>
                 ))}
                 <td>
-                  <NumInput label={`${g.name} SR line`} value={g.srLine / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].srLine = v * M))} />
+                  <NumInput label={`${name(g)} ${t.srLine}`} value={g.srLine / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].srLine = v * M))} />
                 </td>
                 <td>
-                  <input type="checkbox" aria-label={`${g.name} close-out netting`} checked={g.closeOutNetting} onChange={(e) => edit((d) => void (d.groups[gi].closeOutNetting = e.target.checked))} />
+                  <input type="checkbox" aria-label={`${name(g)} ${t.closeOut}`} checked={g.closeOutNetting} onChange={(e) => edit((d) => void (d.groups[gi].closeOutNetting = e.target.checked))} />
                 </td>
                 <td>
-                  <input type="checkbox" aria-label={`${g.name} payment netting`} checked={g.paymentNetting} onChange={(e) => edit((d) => void (d.groups[gi].paymentNetting = e.target.checked))} />
+                  <input type="checkbox" aria-label={`${name(g)} ${t.payNet}`} checked={g.paymentNetting} onChange={(e) => edit((d) => void (d.groups[gi].paymentNetting = e.target.checked))} />
                 </td>
               </tr>
             ))}
             <tr className="group-start">
-              <td>Add-on, %</td>
+              <td>{t.addOn}</td>
               {PILLARS.map((p, pi) => (
                 <td key={p}>
-                  <NumInput label={`Add-on ${p}`} value={state.addOnPct[pi]} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.addOnPct[pi] = v))} />
+                  <NumInput label={`${t.addOn} ${p}`} value={state.addOnPct[pi]} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.addOnPct[pi] = v))} />
                 </td>
               ))}
               <td colSpan={3} />

@@ -5,23 +5,22 @@ import { usdPerUnit } from './market';
 import { makeCtx, type Ctx } from './risk';
 import type { AppState, Ticket, Trade } from './types';
 
-/** The flow covers hedges up to this size with one LP; larger orders are split upstream. */
 export const MAX_AMOUNT_USD = 50_000_000;
 
-/** Turn a ticket into a trade dealt at today's mid rates, or explain why it cannot be dealt. */
-export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: string } {
+/** Why a ticket cannot be dealt. The screen turns the code into words. */
+export type TicketError = 'USE_SWAP_OR_FORWARD' | 'NDF_ONLY' | 'TENOR' | 'AMOUNT' | 'TOO_LARGE' | 'NO_TOM_NEXT' | 'NOT_CLS_PAIR' | 'CLS_SAME_DAY';
+
+/** Turn a ticket into a trade dealt at today's mid rates, or say why it cannot be dealt. */
+export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: TicketError } {
   const pair = PAIRS[ticket.pair];
-  if (pair.deliverable === (ticket.product === 'NDF')) {
-    return { error: pair.deliverable ? `${pair.label} is deliverable: use a swap or forward.` : `${pair.label} trades as an NDF only.` };
-  }
+  if (pair.deliverable === (ticket.product === 'NDF')) return { error: pair.deliverable ? 'USE_SWAP_OR_FORWARD' : 'NDF_ONLY' };
   const tenors = ticket.product === 'SWAP' ? SWAP_TENORS : OUTRIGHT_TENORS;
-  if (!tenors.includes(ticket.tenor)) return { error: `Tenor ${ticket.tenor} is not available for this product.` };
-  if (!(ticket.amount > 0)) return { error: 'Enter an amount.' };
-  if (ticket.amount * usdPerUnit(ctx.market, pair.base) > MAX_AMOUNT_USD) {
-    return { error: 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.' };
-  }
+  if (!tenors.includes(ticket.tenor)) return { error: 'TENOR' };
+  if (!(ticket.amount > 0)) return { error: 'AMOUNT' };
+  // The flow covers hedges up to this size with one LP; larger orders are split upstream.
+  if (ticket.amount * usdPerUnit(ctx.market, pair.base) > MAX_AMOUNT_USD) return { error: 'TOO_LARGE' };
   const dates = valueDates(ctx.t0, ticket.pair, ticket.product, ticket.tenor);
-  if (!dates) return { error: 'Tom-next does not exist today: tomorrow is already the spot date.' };
+  if (!dates) return { error: 'NO_TOM_NEXT' }; // tomorrow is already the spot date
 
   const curve = ctx.curve(ticket.pair);
   const sign = ticket.side === 'BUY' ? 1 : -1;
@@ -36,8 +35,8 @@ export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: string } 
   // CLS needs both currencies to be eligible and cannot take a same-day payment.
   const auto = ticket.product === 'NDF' ? 'CASH' : pair.cls && legs[0].date > ctx.t0 ? 'CLS' : 'GROSS';
   const settlement = ticket.product === 'NDF' || ticket.settlement === 'AUTO' ? auto : ticket.settlement;
-  if (settlement === 'CLS' && !pair.cls) return { error: `${pair.label} cannot settle through CLS.` };
-  if (settlement === 'CLS' && legs[0].date <= ctx.t0) return { error: 'CLS cannot take a payment due today. Settle this hedge gross.' };
+  if (settlement === 'CLS' && !pair.cls) return { error: 'NOT_CLS_PAIR' };
+  if (settlement === 'CLS' && legs[0].date <= ctx.t0) return { error: 'CLS_SAME_DAY' };
 
   return {
     id: 'new',
