@@ -1,0 +1,12 @@
+{
+  "limitCurrency": "USD",
+  "pairs": {
+    "EURUSD": { "label": "EUR/USD", "base": "EUR", "quote": "USD", "pip": 0.0001, "dp": 4, "cls": true, "deliverable": true },
+    "GBPUSD": { "label": "GBP/USD", "base": "GBP", "quote": "USD", "pip": 0.0001, "dp": 4, "cls": true, "deliverable": true },
+    "USDJPY": { "label": "USD/JPY", "base": "USD", "quote": "JPY", "pip": 0.01, "dp": 2, "cls": true, "deliverable": true },
+    "USDCNH": { "label": "USD/CNH", "base": "USD", "quote": "CNH", "pip": 0.0001, "dp": 4, "cls": false, "deliverable": true },
+    "USDTWD": { "label": "USD/TWD", "base": "USD", "quote": "TWD", "pip": 0.001, "dp": 3, "cls": false, "deliverable": false }
+  },
+  "pointTenors": ["ON", "TN", "SN", "1W", "1M", "2M", "3M", "6M", "9M", "1Y"],
+  "usdRateNodeDays": { "ON": 1, "1W": 7, "1M": 30, "2M": 61, "3M": 91, "6M": 182, "9M": 273, "1Y": 365 }
+}
