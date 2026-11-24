@@ -13,18 +13,9 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 const HEADINGS: Record<TabId, { title: string; sub: string }> = {
-  simulator: {
-    title: 'Credit line check for FX hedges',
-    sub: 'Enter a hedge, see what it uses of each credit line and why, then send, fill or reject it.',
-  },
-  formulae: {
-    title: 'How the numbers are worked out',
-    sub: 'Pricing, pre-settlement risk, settlement risk and the check, with one swap followed from start to finish.',
-  },
-  design: {
-    title: 'From first draft to proposed flow',
-    sub: 'A review of the hedging flow for FX swaps on request-based channels, and what changed.',
-  },
+  simulator: { title: 'Does this hedge fit the credit lines?', sub: 'Enter a hedge, pick an LP, send it, then fill or reject it.' },
+  formulae: { title: 'How the numbers are worked out', sub: 'The method, and one swap followed step by step.' },
+  design: { title: 'From first draft to proposed flow', sub: 'What a review of the hedging flow changed.' },
 };
 
 const tabFromHash = (): TabId => TABS.find((t) => `#${t.id}` === window.location.hash)?.id ?? 'simulator';
@@ -94,11 +85,8 @@ export function App() {
 
       <main className="main">
         <div className="heading">
-          <div>
-            <h1>{HEADINGS[tab].title}</h1>
-            <p className="subheading">{HEADINGS[tab].sub}</p>
-          </div>
-          <span className="demo-flag">FICTIONAL DATA</span>
+          <h1>{HEADINGS[tab].title}</h1>
+          <p className="subheading">{HEADINGS[tab].sub}</p>
         </div>
         {tab === 'simulator' && <Simulator state={state} dispatch={dispatch} />}
         {tab === 'formulae' && <Formulae />}
@@ -106,11 +94,8 @@ export function App() {
       </main>
 
       <footer className="footer">
-        <span>Designed and built by Chan Chun Yin Johnny. Every counterparty, credit line, add-on and price here is invented.</span>
-        <span>
-          Your hedges and edits are kept in this browser only.{' '}
-          <a href="https://github.com/chanchunyinjohnny/fx-credit-line-simulator">Source and method notes</a>
-        </span>
+        <span>Chan Chun Yin Johnny · all data invented · saved in this browser only</span>
+        <a href="https://github.com/chanchunyinjohnny/fx-credit-line-simulator">Source</a>
       </footer>
     </div>
   );

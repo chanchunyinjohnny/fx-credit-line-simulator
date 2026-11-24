@@ -1,26 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-/** An English term with its Chinese equivalent beside it. */
-export function Term({ en, zh }: { en: string; zh: string }) {
-  return (
-    <>
-      {en} <span className="zh" lang="zh-Hant">{zh}</span>
-    </>
-  );
-}
-
-export function Section(p: { title: string; zh?: string; unit?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <section className={p.className}>
-      <div className="section-heading">
-        <h2 className="section-title">{p.zh ? <Term en={p.title} zh={p.zh} /> : p.title}</h2>
-        {p.unit && <span className="unit">{p.unit}</span>}
-      </div>
-      {p.children}
-    </section>
-  );
-}
-
 /** A pass or fail state: always an icon and words, never colour alone. */
 export function Status({ ok, children }: { ok: boolean; children: ReactNode }) {
   return (

@@ -20,8 +20,8 @@ All counterparties, credit lines, add-ons and prices are invented.
 
 | View | What it is for |
 | --- | --- |
-| Simulator | Ticket, initial check across LPs, pre-trade check with step-by-step workings, credit line board, hedge list, editable market data and credit lines |
-| Formulae | The method in full, one swap followed from the day it is dealt to a week later, and the comparison with QuantLib |
+| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data and credit lines open on demand |
+| Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
 | Design | The hedging flow as first drawn and as proposed, what the review found, and the open questions |
 
 ## Method

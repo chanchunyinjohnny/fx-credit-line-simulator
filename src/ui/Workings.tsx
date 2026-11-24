@@ -4,7 +4,7 @@ import type { Measured } from '../engine/lines';
 import { usdPerUnit, usdRate, type FxCurve } from '../engine/market';
 import type { Ctx, TradeRisk } from '../engine/risk';
 import type { Group, ISODate, PairId, Trade } from '../engine/types';
-import { Calc, Term } from './bits';
+import { Calc } from './bits';
 import { amt, day, num, pct, pips, rate, shortDay, signedAmt } from './format';
 
 interface Props {
@@ -17,14 +17,12 @@ interface Props {
   openAll?: boolean;
 }
 
-function Step(p: { title: string; zh: string; result: ReactNode; open?: boolean; children: ReactNode }) {
+function Step(p: { title: string; result: ReactNode; open?: boolean; children: ReactNode }) {
   return (
     <li>
       <details open={p.open}>
         <summary>
-          <span className="step-title">
-            <Term en={p.title} zh={p.zh} />
-          </span>
+          <span className="step-title">{p.title}</span>
           <span className="step-result">{p.result}</span>
         </summary>
         <div className="step-body">{p.children}</div>
@@ -92,8 +90,7 @@ function ImpliedRate({ ctx, trade, curve }: { ctx: Ctx; trade: Trade; curve: FxC
     <div className="aside-note">
       <p>
         <strong>What the points mean.</strong> Swapping {info.base} for {info.quote} for {days} days is lending one currency and borrowing the
-        other, so the far rate differs from the near rate by the interest-rate gap (covered interest parity{' '}
-        <span className="zh" lang="zh-Hant">拋補利率平價</span>):
+        other, so the far rate differs from the near rate by the interest-rate gap (covered interest parity):
       </p>
       <Calc>
         far ÷ near = (1 + r<sub>{info.quote}</sub> × t) ÷ (1 + r<sub>{info.base}</sub> × t), with t = {days}/360
@@ -124,7 +121,7 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
 
   return (
     <ol className="steps">
-      <Step title="Value dates" zh="交割日" open={openAll} result={isSwap ? `${shortDay(near!.date)} → ${shortDay(far.date)}` : shortDay(far.date)}>
+      <Step title="Value dates" open={openAll} result={isSwap ? `${shortDay(near!.date)} → ${shortDay(far.date)}` : shortDay(far.date)}>
         <p>
           Dealt on {day(trade.tradeDate)}. The spot date is two business days on: {day(spot)}. The day in between only has to be a business day
           for {nonUsd}; the spot date itself must be a business day for {nonUsd} and USD.
@@ -141,7 +138,6 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
 
       <Step
         title="Rates"
-        zh="匯率"
         open={openAll}
         result={isSwap ? `${rate(trade.pair, near!.rate)} / ${rate(trade.pair, far.rate)}` : rate(trade.pair, far.rate)}
       >
@@ -163,7 +159,7 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
         )}
       </Step>
 
-      <Step title="Cash flows" zh="現金流" open={openAll} result={trade.product === 'NDF' ? 'Net amount only' : `${trade.legs.length * 2} payments`}>
+      <Step title="Cash flows" open={openAll} result={trade.product === 'NDF' ? 'Net amount only' : `${trade.legs.length * 2} payments`}>
         {trade.product === 'NDF' ? (
           <p>
             No principal changes hands. On {day(far.date)} the difference between {rate(trade.pair, far.rate)} and the fixing rate, on {info.base}{' '}
@@ -202,11 +198,8 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
         )}
       </Step>
 
-      <Step title="Market value" zh="市值" open={openAll} result={`USD ${signedAmt(risk.mv)}`}>
-        <p>
-          What the hedge is worth today: each unsettled leg is revalued at today's rate for its date, and the gain or loss is brought back to
-          today at the USD rate.
-        </p>
+      <Step title="Market value" open={openAll} result={`USD ${signedAmt(risk.mv)}`}>
+
         <Calc>
           leg value = amount × (today's rate − dealt rate){info.quote === 'USD' ? '' : " ÷ today's rate"} × discount factor
         </Calc>
@@ -226,18 +219,15 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
           );
         })}
         {risk.legs.length > 1 && <Calc>Market value = sum of the legs = USD {signedAmt(risk.mv)}</Calc>}
-        {isNew && <p className="note">A hedge dealt at today's rates starts at zero. It moves when rates move and as its dates draw nearer.</p>}
+
       </Step>
 
-      <Step title="Add-on and exposure of this hedge" zh="附加因子與風險敞口" open={openAll} result={`USD ${amt(risk.exposure)}`}>
+      <Step title="Add-on and exposure of this hedge" open={openAll} result={`USD ${amt(risk.exposure)}`}>
         {ownPillar < 0 ? (
           <p>The last leg settles today or has settled, so nothing is left to replace: no pre-settlement risk.</p>
         ) : (
           <>
-            <p>
-              The add-on covers how far the market value could move before the hedge matures. For a swap it is taken on the far leg, because
-              once the near leg has settled the swap is an outright forward.
-            </p>
+
             <Calc>
               Notional = {isSwap ? 'far-leg ' : ''}amount at spot = {info.base} {amt(Math.abs(far.base))}
               {info.base === 'USD' ? '' : ` × ${baseUsd.toFixed(info.dp)}`} = USD {amt(risk.notionalUsd)}
@@ -258,15 +248,12 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
 
       <Step
         title={`Pre-settlement risk of ${group.name}`}
-        zh="交割前風險"
         open={openAll}
         result={agg ? `${PILLARS[ownPillar]}: USD ${amt(agg.exposure)} of ${amt(group.psrLines[ownPillar])}` : 'Unchanged'}
       >
         <p>
-          A hedge counts in the pillar its maturity falls in and in every shorter pillar, so a line can cap how much runs beyond each maturity.{' '}
-          {group.closeOutNetting
-            ? 'This group has a close-out netting agreement: market values offset each other, and the add-on is scaled by how much they offset.'
-            : 'This group has no close-out netting agreement: each hedge’s own exposure is added up.'}
+          A hedge counts in its own pillar and in every shorter one.{' '}
+          {group.closeOutNetting ? 'Close-out netting applies: market values offset and the add-on is scaled down.' : 'No close-out netting: exposures are added up.'}
         </p>
         {group.closeOutNetting ? (
           <>
@@ -327,14 +314,12 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
 
       <Step
         title={`Settlement risk of ${group.name}`}
-        zh="結算風險"
         open={openAll}
         result={srDays.length ? `USD ${amt(Math.max(...srDays.map((d) => d.exposure)))} at most` : 'None'}
       >
         {trade.settlement === 'CLS' && (
           <p>
-            None. This hedge settles through CLS, where each side's payment is released only if the other's is (payment-versus-payment{' '}
-            <span className="zh" lang="zh-Hant">同步交收</span>). Nothing can be paid away without being received.
+            None. This hedge settles through CLS, where each side's payment is released only if the other's is (payment-versus-payment).
           </p>
         )}
         {trade.settlement === 'CASH' && <p>None. An NDF pays one net amount in USD; no principal is exchanged, so none can be lost in settlement.</p>}
@@ -342,11 +327,8 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openAll }: 
         {trade.settlement === 'GROSS' && srDays.length > 0 && (
           <>
             <p>
-              Settled gross: we pay one currency and separately wait for the other. What we are due to receive on a date is what we would lose if
-              we paid and the counterparty did not. Amounts are in USD at spot, not discounted; the same line applies to every date.{' '}
-              {group.paymentNetting
-                ? 'This group has payment netting: flows in the same currency on the same date offset first.'
-                : 'This group has no payment netting: every receivable is added up.'}
+              Settled gross: what we are due to receive on a date is lost if we pay and the counterparty does not.{' '}
+              {group.paymentNetting ? 'Payment netting applies: same-currency flows on a date offset first.' : 'No payment netting: every receivable is added up.'}
             </p>
             {srDays.map((d) => {
               const net = new Map<string, number>();
