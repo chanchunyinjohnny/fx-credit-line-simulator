@@ -1,6 +1,6 @@
 import { PAIRS, PILLARS, pillarEnds, pillarIndex } from './calendar';
 import { dfUsd, fxCurve, usdPerUnit, type FxCurve } from './market';
-import type { Ccy, ISODate, MarketData, PairId, Trade } from './types';
+import type { Ccy, ISODate, Leg, MarketData, PairId, Trade } from './types';
 
 /** Everything a valuation needs for one business date. */
 export interface Ctx {
@@ -134,13 +134,16 @@ export interface SrDay {
  *  Only principal flows of trades settled gross count; CLS and cash-settled
  *  trades carry none. Without payment netting every receivable is added up.
  *  With it, flows in the same currency on the same date offset first. */
+/** A payment due on the day the hedge is dealt is too late for CLS, so it always settles gross. */
+export const settlesGross = (trade: Trade, leg: Leg) =>
+  trade.settlement === 'GROSS' || (trade.settlement === 'CLS' && leg.date === trade.tradeDate);
+
 export function srByDate(ctx: Ctx, trades: Trade[], paymentNetting: boolean): Map<ISODate, SrDay> {
   const days = new Map<ISODate, SrDay>();
   for (const trade of trades) {
-    if (trade.settlement !== 'GROSS') continue;
     const { base, quote } = PAIRS[trade.pair];
     for (const leg of trade.legs) {
-      if (leg.date < ctx.t0) continue;
+      if (leg.date < ctx.t0 || !settlesGross(trade, leg)) continue;
       let day = days.get(leg.date);
       if (!day) days.set(leg.date, (day = { date: leg.date, flows: [], exposure: 0 }));
       const add = (ccy: Ccy, amount: number) =>

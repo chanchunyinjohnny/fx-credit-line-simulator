@@ -18,16 +18,18 @@ const T = {
       ['Only one LP, up to 50 mio', 'Kept as the scope; split orders would run the flow per child'],
     ],
     scope: 'Scope: trading by request, where the counterparty is known before the trade (FX swap, forward, NDF). An anonymous order book screens credit itself, so it needs a different design.',
-    open: 'Open questions for the credit owner',
+    confirmed: 'Confirmed',
+    answers: [
+      'The credit owner sets a fixed limit for the desk each day. The desk counts only its own hedges against it.',
+      'A failed check blocks the hedge. The system has no exceptions; a trader handles those by hand.',
+      'Whether exposure is netted is a setting for each banking group.',
+      'A payment due on the day it is dealt always counts in full. A leg that can go through CLS carries no settlement risk.',
+    ],
+    open: 'Assumed, still to confirm',
     questions: [
-      'Is settlement risk counted on the value date only, as assumed, or from when our payment can no longer be cancelled until receipt is confirmed?',
-      'Is the morning figure what is left after the overnight run, or a fixed slice? Where a screen shows both an available and an allowed limit, which one does the check use?',
-      'Is the add-on set by remaining maturity, as assumed, or one rate per product family?',
-      'The standard method keeps the add-on in full when the market value is negative. Does the bank-wide system let a negative value reduce it?',
-      'Is utilisation always measured gross, as assumed, or net where a netting agreement exists?',
-      'Is an overnight swap between CLS currencies settled gross on both legs or only the same-day leg?',
-      'A failed check blocks the hedge here. Who approves an exception, and is it recorded before the hedge is sent?',
-      'How long does a reservation live when an LP does not answer?',
+      'Settlement risk is counted on the value date only.',
+      'The add-on depends on remaining maturity and is the same for every product.',
+      'A negative market value does not reduce the add-on.',
     ],
   },
   zh: {
@@ -46,16 +48,18 @@ const T = {
       ['只涵蓋單一 LP、5,000 萬以內', '維持這個範圍；拆單時每張子單各自走一次流程'],
     ],
     scope: '適用範圍：詢價交易，成交前已知對手（外匯掉期、遠期、NDF）。匿名訂單簿由場地自行篩選信貸，需要另一套設計。',
-    open: '待授信管理部門確認的問題',
+    confirmed: '已確認',
+    answers: [
+      '授信管理部門每日給交易台一個固定額度。交易台只計自己的對沖。',
+      '檢查不通過就攔截。系統內沒有例外，例外由交易員人手處理。',
+      '是否按淨額計，每個銀行集團可以設定。',
+      '當日交收的款項一律計全額。可以經 CLS 的那一邊沒有結算風險。',
+    ],
+    open: '假設，仍待確認',
     questions: [
-      '結算風險是只計在交割日當天（本程式的假設），還是由付款不能撤回起計至確認收款？',
-      '每朝收到的數字，是隔夜匯總後的餘額，還是固定的一份額度？畫面同時有「可用額度」和「允許額度」時，檢查用哪一個？',
-      '附加因子是按剩餘期限設定（本程式的假設），還是每類產品一個比率？',
-      '標準方法在市值為負時保留全部附加金額。全行的額度系統是否容許負市值減少附加金額？',
-      '額度使用量是否一律按未淨額的風險敞口計（本程式的假設），還是有淨額結算協議時按淨額計？',
-      'CLS 貨幣之間的隔夜掉期，是兩邊都全額結算，還是只有當日那一邊？',
-      '本程式在檢查不通過時直接攔截。例外由誰審批？是否在對沖送出前記錄？',
-      'LP 沒有回覆時，預佔額度保留多久？',
+      '結算風險只計交割日當天。',
+      '附加因子按剩餘期限分檔，各產品相同。',
+      '市值為負時，附加金額不減少。',
     ],
   },
 } as const;
@@ -97,6 +101,13 @@ export function Design() {
         </table>
       </div>
       <p className="quiet">{t.scope}</p>
+
+      <h2>{t.confirmed}</h2>
+      <ol className="plain">
+        {t.answers.map((a) => (
+          <li key={a}>{a}</li>
+        ))}
+      </ol>
 
       <h2>{t.open}</h2>
       <ol className="plain">

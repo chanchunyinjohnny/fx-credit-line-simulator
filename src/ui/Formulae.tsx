@@ -49,7 +49,7 @@ const T = {
       },
       {
         title: 'Settlement risk',
-        text: 'What we are due to receive on a settlement day: lost if we pay and are not paid. Zero through CLS and for NDFs.',
+        text: 'What we are due to receive on a settlement day: lost if we pay and are not paid. Zero through CLS and for NDFs. A payment due on the day it is dealt always counts in full.',
         calcs: ['exposure on a date = amounts receivable that day, in USD at spot'],
       },
       {
@@ -77,7 +77,7 @@ const T = {
       'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
       'Net-to-gross ratio and add-on netting: Basel II framework, Annex 4. With no positive market value the ratio is taken as 1, as the US swap margin rule does for the same formula.',
       'Settlement risk is what is due to be received, counted on the value date only (the "calendar day" method). Basel guidance on FX settlement risk (2013) notes that this can understate it: the exposure runs from when our payment can no longer be cancelled until receipt is confirmed.',
-      'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a hedge with a payment due today is assumed to settle gross.',
+      'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a payment due on the day it is dealt always counts in full. The other leg can still go through CLS.',
       'The implied interest rate uses Actual/365 for GBP and Actual/360 for USD, EUR, JPY and CNH. Actual/365 for TWD is not confirmed.',
       'QuantLib has no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
       'Every assumption is listed in the design notes in the source repository.',
@@ -114,7 +114,7 @@ const T = {
       },
       {
         title: '結算風險',
-        text: '交收日我方應收的金額：若我方已付而對手未付，就是損失。經 CLS 交收和 NDF 為零。',
+        text: '交收日我方應收的金額：若我方已付而對手未付，就是損失。經 CLS 交收和 NDF 為零。當日交收的款項一律計全額。',
         calcs: ['某日風險敞口 = 當日應收金額，按即期折算為美元'],
       },
       {
@@ -142,7 +142,7 @@ const T = {
       '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
       '淨額對總額比率（NGR）與附加金額的淨額計算：巴塞爾協定二，附件四。沒有任何正市值時 NGR 取 1，與美國掉期保證金規則對同一公式的處理相同。',
       '結算風險是我方應收的金額，只計在交割日當天（「日曆日」方法）。巴塞爾 2013 年外匯結算風險指引指出這可能低估風險：敞口實際上由我方付款不能再撤回開始，直至確認收款為止。',
-      'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以有當日到期款項的對沖假設為全額結算。',
+      'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以當日交收的款項一律計全額。另一邊仍可經 CLS。',
       '隱含利率的計息日數：GBP 用 Actual/365，USD、EUR、JPY、CNH 用 Actual/360；TWD 用 Actual/365，未經證實。',
       'QuantLib 沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
       '所有假設都列在原始碼倉庫的設計說明裡。',
@@ -254,12 +254,12 @@ export function Formulae() {
 
       <h2>{t.steps}</h2>
       <h3>{t.dealt(day(ex.s0.businessDate, lang))}</h3>
-      <Workings ctx={ex.ctx0} trade={ex.trade} risk={ex.check.risk} measured={ex.check.after} group={ex.check.group} isNew />
+      <Workings ctx={ex.ctx0} trade={ex.trade} risk={ex.check.risk} measured={ex.check.after} group={ex.check.group} isNew openFrom={1} />
       <h3>{t.later(rate('EURUSD', LATER_SPOT))}</h3>
       <p>
         {t.laterText(rate('EURUSD', far.rate), signedAmt(ex.risk1.mv), amt(ex.risk1.exposure), amt(Math.max(-ex.risk1.mv, 0) + ex.risk1.addOn))}
       </p>
-      <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} />
+      <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} openFrom={4} />
 
       <h2>{t.checked}</h2>
       <p>{t.checkedText(cmp.version, amt(total), allMatch)}</p>

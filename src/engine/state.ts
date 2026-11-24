@@ -32,9 +32,8 @@ export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: TicketErr
         ]
       : [{ date: dates.far, base: sign * ticket.amount, rate: curve.forward(dates.far) }];
 
-  // CLS needs both currencies to be eligible. Instructions are due by 00:00 CET on the value date, so a
-  // payment due today has normally missed the cut-off: such a hedge is assumed to settle gross unless told otherwise.
-  const auto = ticket.product === 'NDF' ? 'CASH' : pair.cls && legs[0].date > ctx.t0 ? 'CLS' : 'GROSS';
+  // CLS needs both currencies to be eligible. A payment due today still counts in full: see settlesGross.
+  const auto = ticket.product === 'NDF' ? 'CASH' : pair.cls ? 'CLS' : 'GROSS';
   const settlement = ticket.product === 'NDF' || ticket.settlement === 'AUTO' ? auto : ticket.settlement;
   if (settlement === 'CLS' && !pair.cls) return { error: 'NOT_CLS_PAIR' };
 

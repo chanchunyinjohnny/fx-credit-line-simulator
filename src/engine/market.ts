@@ -50,7 +50,8 @@ export function fxCurve(market: MarketData, t0: ISODate, pair: PairId): FxCurve 
   return { pair, tom, spot, nodes, forward };
 }
 
-const RATE_NODES = (Object.entries(reference.usdRateNodeDays) as [RateTenor, number][]).sort((a, b) => a[1] - b[1]);
+/** USD rate tenors with their length in calendar days, shortest first. */
+export const RATE_NODES = (Object.entries(reference.usdRateNodeDays) as [RateTenor, number][]).sort((a, b) => a[1] - b[1]);
 
 /** USD rate in percent for a number of calendar days, linear between nodes, flat outside. */
 export function usdRate(market: MarketData, days: number): number {

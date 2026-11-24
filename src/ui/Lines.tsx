@@ -22,7 +22,7 @@ const T = {
     byDateNote: 'What each group is due to pay us on each settlement date, against its daily line.',
     date: 'Settlement date',
     line: (x: string) => `line ${x}`,
-    empty: 'No gross-settled payments are outstanding. Hedges settled through CLS and NDFs carry no settlement risk; a USD/CNH swap or an overnight swap does.',
+    empty: 'Nothing is due outside CLS. Payments through CLS and NDFs carry no settlement risk; a USD/CNH swap or the same-day leg of an overnight swap does.',
     overBy: (x: string) => `over by ${x}`,
   },
   zh: {
@@ -38,7 +38,7 @@ const T = {
     byDateNote: '每個交收日各集團應付給我方的金額，對比其每日額度。',
     date: '交收日',
     line: (x: string) => `額度 ${x}`,
-    empty: '目前沒有全額結算的未交收款項。經 CLS 交收的對沖和 NDF 沒有結算風險；USD/CNH 掉期或隔夜掉期才有。',
+    empty: '目前沒有 CLS 以外的未交收款項。經 CLS 交收的款項和 NDF 沒有結算風險；USD/CNH 掉期和隔夜掉期當日那一邊才有。',
     overBy: (x: string) => `超出 ${x}`,
   },
 };

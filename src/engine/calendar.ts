@@ -58,27 +58,33 @@ function preceding(d: ISODate, ccys: Ccy[]) {
 
 export const tomDate = (t0: ISODate, pair: PairId) => nextGood(t0, settlementCcys(pair));
 
-/** T+2. The first day only has to be a business day for the non-USD currency;
- *  the spot date itself must be good for both currencies and USD. */
-export function spotDate(t0: ISODate, pair: PairId) {
-  const nonUsd = pairCcys(pair).filter((c) => c !== 'USD');
-  return nextGood(nextGood(t0, nonUsd), settlementCcys(pair));
-}
+/** The day between the trade date and the spot date. It only has to be a business day for the non-USD currency. */
+export const dayBeforeSpot = (t0: ISODate, pair: PairId) =>
+  nextGood(
+    t0,
+    pairCcys(pair).filter((c) => c !== 'USD'),
+  );
 
-/** Value date of a tenor counted from the spot date. Weeks roll forward; months
- *  roll forward unless that leaves the month, and a spot date on the last
- *  business day of its month maps to the last business day of the target month. */
-export function tenorDate(spot: ISODate, tenor: Tenor, pair: PairId): ISODate {
+/** T+2. The spot date itself must be good for both currencies and USD. */
+export const spotDate = (t0: ISODate, pair: PairId) => nextGood(dayBeforeSpot(t0, pair), settlementCcys(pair));
+
+/** How a tenor's value date is reached from the spot date: the calendar date the
+ *  tenor lands on (target) and the business day it becomes (date). Weeks roll
+ *  forward; months roll forward unless that leaves the month, and a spot date on
+ *  the last business day of its month maps to the last business day of the target month. */
+export function tenorSteps(spot: ISODate, tenor: Tenor, pair: PairId): { target: ISODate; date: ISODate; monthEnd: boolean } {
   const ccys = settlementCcys(pair);
-  if (tenor === 'SN') return nextGood(spot, ccys);
-  if (tenor === '1W') return following(addDays(spot, 7), ccys);
+  if (tenor === 'SN') return { target: addDays(spot, 1), date: nextGood(spot, ccys), monthEnd: false };
+  if (tenor === '1W') return { target: addDays(spot, 7), date: following(addDays(spot, 7), ccys), monthEnd: false };
   const months = tenor === '1Y' ? 12 : parseInt(tenor, 10);
   const target = addMonths(spot, months);
-  const spotIsMonthEnd = nextGood(spot, ccys).slice(0, 7) !== spot.slice(0, 7);
-  if (spotIsMonthEnd) return preceding(lastDayOfMonth(target), ccys);
+  const monthEnd = nextGood(spot, ccys).slice(0, 7) !== spot.slice(0, 7);
+  if (monthEnd) return { target, date: preceding(lastDayOfMonth(target), ccys), monthEnd };
   const rolled = following(target, ccys);
-  return rolled.slice(0, 7) === target.slice(0, 7) ? rolled : preceding(target, ccys);
+  return { target, date: rolled.slice(0, 7) === target.slice(0, 7) ? rolled : preceding(target, ccys), monthEnd };
 }
+
+export const tenorDate = (spot: ISODate, tenor: Tenor, pair: PairId) => tenorSteps(spot, tenor, pair).date;
 
 export const SWAP_TENORS: Tenor[] = ['ON', 'TN', 'SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
 export const OUTRIGHT_TENORS: Tenor[] = ['1W', '1M', '2M', '3M', '6M', '9M', '1Y'];

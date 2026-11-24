@@ -36,7 +36,7 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | Exposure of one hedge | max(market value, 0) + notional × add-on %, on the far leg's notional and maturity for a swap. A setting switches to an internal variant in which a negative value reduces the add-on |
 | Pre-settlement risk, no netting | sum of each hedge's exposure, per pillar |
 | Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
-| Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs |
+| Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs. A payment due on the day it is dealt always counts in full |
 | Headroom | credit line − earlier days' hedges − today's fills − reservations |
 
 ## How the numbers are checked

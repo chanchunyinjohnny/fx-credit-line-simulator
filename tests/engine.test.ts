@@ -152,9 +152,14 @@ describe('settlement risk', () => {
     expect(srByDate(ctx, [eur, ndf], false).size).toBe(0);
   });
 
-  it('an overnight swap is assumed to miss the CLS cut-off, so it carries settlement risk unless told otherwise', () => {
-    expect(deal(s, ticket({ tenor: 'ON' })).settlement).toBe('GROSS');
-    expect(deal(s, ticket({ tenor: 'ON', settlement: 'CLS' })).settlement).toBe('CLS');
+  it('counts the same-day leg of an overnight swap in full and nothing for the leg that goes through CLS', () => {
+    const on = deal(s, ticket({ tenor: 'ON' })); // buy EUR 20m today, sell it back tomorrow
+    expect(on.settlement).toBe('CLS');
+    const days = srByDate(ctx, [on], false);
+    expect([...days.keys()]).toEqual([s.businessDate]);
+    expect(days.get(s.businessDate)!.exposure).toBeCloseTo(20 * M * s.market.pairs.EURUSD.spot, 6);
+    // The day after, the leg left has been in CLS since it was dealt.
+    expect(srByDate({ ...ctx, t0: on.legs[1].date }, [on], false).size).toBe(0);
   });
 });
 
