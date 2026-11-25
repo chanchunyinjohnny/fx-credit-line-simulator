@@ -13,7 +13,7 @@ import { Workings } from './Workings';
 const M = 1_000_000;
 const EXAMPLE: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 20 * M, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
 const LATER_SPOT = 1.1767; // 1% above the starting 1.1650
-const CHANNEL_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 20 * M, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' };
+const CHANNEL_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 10 * M, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' };
 
 const T = {
   en: {
@@ -56,7 +56,7 @@ const T = {
         calcs: ["headroom = credit line − earlier days − today's fills − reservations − room held for channels"],
       },
       {
-        title: 'A channel that checks credit itself',
+        title: 'A channel that discloses after the trade',
         text: 'An order book matches first and names the counterparty afterwards, so the desk cannot check each trade. But the channel fills only within the limit the desk has set there. That limit is the largest trade the desk allows. The desk holds the room that trade would use on the credit line first, then sets the limit. A fill turns the held room into usage, exactly as a reservation does. The desk then holds room again and sets the limit back. As the line fills the limit shrinks; at zero the channel stops filling with that counterparty. The channel limit is one trade amount for every tenor, while the add-on rises with tenor. With orders of several tenors there, the desk holds for the longest; if a shorter one fills, the excess comes back when it is booked.',
         calcs: ['channel limit = min(largest trade, free room on the line ÷ add-on %)', 'room held = channel limit × add-on % of the longest order sent there'],
       },
@@ -66,8 +66,10 @@ const T = {
     later: (r: string) => `A week later, spot up 1% to ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
-    ch: 'A channel that checks credit itself, step by step',
-    chIntro: (ch: string, g: string, keep: string) => `${ch} with ${g}. The desk sends one order there, USD/TWD NDF 1M, and allows a trade of up to USD ${keep}. The channel limit is a trade amount and the credit line is a risk amount; the add-on converts one into the other.`,
+    ch: 'A channel that discloses after the trade, step by step',
+    chIntro: (ch: string, g: string, line: string, keep: string) =>
+      `The example drawn on the Design view, in dollars. ${ch} with ${g}: a 1M credit line of USD ${line}. The desk sends one order there, USD/TWD NDF 1M, and allows a trade of up to USD ${keep}. The channel limit is a trade amount and the credit line is a risk amount; the add-on converts one into the other.`,
+    chUses: (keep: string, pct: string, held: string) => `the largest trade uses ${keep} × ${pct}% = USD ${held} of the line`,
     chSuppose: (g: string, fill: string) => `Suppose the channel matches a trade of USD ${fill} with ${g}: the largest it may.`,
     chSteps: ['Before any fill: hold room, then set the limit', 'The channel fills an order', 'The fill report: book it, then top up', 'When the line runs short'],
     chHeld: (avail: string, pct: string, held: string, to: string) => `room held = channel limit ${avail} × ${pct}% = USD ${held}, on the ${to} line and every shorter one`,
@@ -78,7 +80,7 @@ const T = {
     chFree: (p: string, line: string, used: string, room: string) => `free room on the ${p} line = ${line} − ${used} in use = ${room}`,
     chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `channel limit = min(largest trade ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
     chCost: (before: string, after: string) => `The fill has come out of headroom: ${before} before, ${after} after. The room held is the same as before.`,
-    chShortIntro: (line: string, used: string) => `Take a 1M line of ${line} with ${used} already in use.`,
+    chShortIntro: (used: string) => `After more fills, ${used} is in use.`,
     chStop: (p: string, line: string, used: string) => `Once ${used} of the ${p} line of ${line} is in use, free room is 0 and the channel limit is 0. The channel no longer fills with this group, and nothing went over the line.`,
     more: 'Assumptions, limits and sources',
     notes: [
@@ -132,7 +134,7 @@ const T = {
         calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔 − 場地切片'],
       },
       {
-        title: '自行檢查額度的場地',
+        title: '事後披露的場地',
         text: '訂單簿先撮合，成交後才知道對手，交易台不能逐筆檢查。但場地只會在交易台設定的限額之內成交。這個限額就是交易台容許的最大一筆。交易台先在授信額度上預留這一筆要用的額度（場地切片），再設限額。成交後，這份切片轉為已用，和預佔轉為已用一樣。交易台隨即再預留，把限額設回來。額度越滿，限額越小；到零時，場地不再和這個對手成交。場地限額是一個交易金額，不分期限；附加因子卻是期限越長越大。在場地上掛了幾種期限的訂單時，按最長的那種預留；成交的若是較短的，多留的在記帳後退回。',
         calcs: ['場地限額 = min(最大一筆, 額度上的空間 ÷ 附加因子 %)', '場地切片 = 場地限額 × 送往該場地最長期限訂單的附加因子 %'],
       },
@@ -142,8 +144,10 @@ const T = {
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
-    ch: '自行檢查額度的場地，逐步計算',
-    chIntro: (ch: string, g: string, keep: string) => `${ch} 對 ${g}。交易台只送一種訂單到這個場地（USD/TWD NDF，1M），一筆最多做 USD ${keep}。場地限額是交易金額，授信額度是風險金額，兩者用附加因子換算。`,
+    ch: '事後披露的場地，逐步計算',
+    chIntro: (ch: string, g: string, line: string, keep: string) =>
+      `和流程設計頁的示意圖是同一個例子，單位換成美元。${ch} 對 ${g}：1M 授信額度 USD ${line}。交易台只送一種訂單到這個場地（USD/TWD NDF，1M），一筆最多做 USD ${keep}。場地限額是交易金額，授信額度是風險金額，兩者用附加因子換算。`,
+    chUses: (keep: string, pct: string, held: string) => `最大一筆用掉的額度 = ${keep} × ${pct}% = USD ${held}`,
     chSuppose: (g: string, fill: string) => `假設場地和 ${g}撮合了一筆 USD ${fill}，即最大的一筆。`,
     chSteps: ['成交之前：先預留，再設限額', '場地成交一張訂單', '成交回報：記帳，然後補回', '額度快用完的時候'],
     chHeld: (avail: string, pct: string, held: string, to: string) => `場地切片 = 場地限額 ${avail} × ${pct}% = USD ${held}，佔 ${to} 及所有更短的期限檔`,
@@ -154,7 +158,7 @@ const T = {
     chFree: (p: string, line: string, used: string, room: string) => `${p} 額度上的空間 = ${line} − 已用 ${used} = ${room}`,
     chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `場地限額 = min(最大一筆 ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
     chCost: (before: string, after: string) => `這筆成交用掉的是可用額度：之前 ${before}，之後 ${after}。場地切片和成交前一樣。`,
-    chShortIntro: (line: string, used: string) => `假設 1M 額度是 ${line}，已用 ${used}。`,
+    chShortIntro: (used: string) => `之後再成交幾筆，已用到 ${used}。`,
     chStop: (p: string, line: string, used: string) => `到 ${p} 額度 ${line} 已用 ${used} 時，空間是 0，場地限額是 0。場地不再和這個集團成交，全程沒有超出額度。`,
     more: '假設、限制與資料來源',
     notes: [
@@ -186,7 +190,7 @@ function buildExample() {
   return { s0, ctx0, trade, check, ifGross, s1, ctx1, measured1, filled: s1.trades[0], risk1: measured1.risks[0] };
 }
 
-/** One channel followed through a fill and its top-up, then on a line that is nearly full. */
+/** One channel followed through a fill and its top-up, then to the point where the line is nearly full. */
 function buildChannelExample() {
   const view = (s: ReturnType<typeof defaultState>) => {
     const b = board(makeCtx(s), s, 'B');
@@ -194,17 +198,22 @@ function buildChannelExample() {
     const psr = b.psr[a.pillar];
     return { a, psr, inUse: psr.used - psr.allocated };
   };
-  const s0 = defaultState();
+  // The line of 100 and the trade of 10 drawn on the Design view, in dollars:
+  // a 1M line of 1 mio, and a largest trade of 10 mio that uses 1% of its amount.
+  let s0 = reducer(defaultState(), { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = M) });
+  s0 = reducer(s0, { type: 'SET_CHANNEL_BUFFER', channel: 'EBSM', groupId: 'B', keepUsd: CHANNEL_ORDER.amount });
   const ctx0 = makeCtx(s0);
   const before = view(s0);
   const fill = channelFill(ctx0, s0, buildTrade(ctx0, CHANNEL_ORDER) as Trade);
-  const after = view(reducer(s0, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER }));
+  let s = reducer(s0, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
+  const after = view(s);
 
-  // A line with room for two and a half fills.
-  let s = reducer(s0, { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = 500_000) });
-  for (let i = 0; i < 2; i++) s = reducer(s, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
+  // Eight more trades of that size and one of half the size leave room for half a trade.
+  const half = { ...CHANNEL_ORDER, amount: CHANNEL_ORDER.amount / 2 };
+  for (let i = 0; i < 8; i++) s = reducer(s, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
+  s = reducer(s, { type: 'CHANNEL_FILL', ticket: half });
   const short = view(s);
-  const full = view(reducer(s, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER }));
+  const full = view(reducer(s, { type: 'CHANNEL_FILL', ticket: half }));
   return { group: s0.groups[1], channel: CHANNELS[before.a.buffer.channel].label, before, fill, after, short, full };
 }
 
@@ -269,7 +278,8 @@ export function Formulae() {
       <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} openFrom={4} />
 
       <h2>{t.ch}</h2>
-      <p>{t.chIntro(ch.channel, partyName(ch.group.name, lang), amt(ch.before.a.buffer.keepUsd))}</p>
+      <p>{t.chIntro(ch.channel, partyName(ch.group.name, lang), amt(ch.before.psr.line), amt(ch.before.a.buffer.keepUsd))}</p>
+      <Calc>{t.chUses(amt(ch.before.a.buffer.keepUsd), String(ch.before.a.addOnPct), amt((ch.before.a.buffer.keepUsd * ch.before.a.addOnPct) / 100))}</Calc>
       <h3>1. {t.chSteps[0]}</h3>
       <Calc>{t.chHeld(amt(ch.before.a.available), String(ch.before.a.addOnPct), amt(ch.before.a.held), ch.before.psr.key)}</Calc>
       <Calc>{t.chRoom(ch.before.psr.key, amt(ch.before.psr.line), amt(ch.before.inUse), amt(ch.before.psr.allocated), amt(ch.before.psr.headroom))}</Calc>
@@ -293,7 +303,7 @@ export function Formulae() {
       <Calc>{t.chRoom(ch.after.psr.key, amt(ch.after.psr.line), amt(ch.after.inUse), amt(ch.after.psr.allocated), amt(ch.after.psr.headroom))}</Calc>
       <p>{t.chCost(amt(ch.before.psr.headroom), amt(ch.after.psr.headroom))}</p>
       <h3>4. {t.chSteps[3]}</h3>
-      <p>{t.chShortIntro(amt(ch.short.psr.line), amt(ch.short.inUse))}</p>
+      <p>{t.chShortIntro(amt(ch.short.inUse))}</p>
       <Calc>{t.chFree(ch.short.psr.key, amt(ch.short.psr.line), amt(ch.short.inUse), amt(ch.short.psr.line - ch.short.inUse))}</Calc>
       <Calc>
         {t.chAvail(

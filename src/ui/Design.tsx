@@ -2,7 +2,11 @@ import { ChannelConcept } from './ChannelConcept';
 import { ChannelFlow, FlowDiagram, flowTitle, type FlowKind } from './FlowDiagram';
 import { useLang } from './i18n';
 
-const KINDS: FlowKind[] = ['send', 'callback', 'channel'];
+/** The two kinds of channel and the flows that belong to each. */
+const KINDS: { key: 'pre' | 'post'; flows: FlowKind[] }[] = [
+  { key: 'pre', flows: ['send', 'callback'] },
+  { key: 'post', flows: ['channel'] },
+];
 
 const T = {
   en: {
@@ -21,14 +25,21 @@ const T = {
       ['Only one LP, up to 50 mio', 'Kept as the scope; split orders would run the flow per child'],
     ],
     kinds: 'Two kinds of channel',
-    kindsLead: 'What decides the design is who can say no before the trade is final.',
+    kindsLead: 'One thing separates them: whether the desk learns the counterparty before the trade is final, or after.',
+    kindNames: { pre: 'Disclosed before the trade', post: 'Disclosed after the trade' },
+    kindRows: [
+      ['The desk learns the counterparty', 'Before the trade is final: when it sends, or when the channel asks', 'From the fill report'],
+      ['Who checks credit', 'The desk, trade by trade', 'The channel, against a limit the desk set in advance'],
+      ['How room is taken on the line', 'Reserved when this hedge passes the check', 'Held in advance for the channel'],
+      ['Channels', 'Request for quote and streams. An order book that asks before the trade is final', 'An order book that fills on its own limits'],
+    ],
     kindsWhere: {
       send: 'Request for quote or stream: 360T, FXGO.',
-      callback: 'An order book that asks before the trade is final.',
-      channel: 'An order book that fills on limits it holds: EBS Market.',
+      callback: 'An order book that names the counterparty and asks.',
+      channel: 'An order book that names the counterparty afterwards: EBS Market.',
     },
     legend: 'The shaded step is where the desk decides on the credit line.',
-    canHead: 'Where the channel checks: what the desk can and cannot do',
+    canHead: 'Disclosed after the trade: what the desk can and cannot do',
     can: 'Can',
     canList: [
       'Keep every counterparty within its line. The channel fills only within the limit, and the room is held before the limit is set.',
@@ -78,14 +89,21 @@ const T = {
       ['只涵蓋單一 LP、5,000 萬以內', '維持這個範圍；拆單時每張子單各自走一次流程'],
     ],
     kinds: '兩類渠道',
-    kindsLead: '設計只取決於一件事：成交前誰可以說「不」。',
+    kindsLead: '分界只有一個：交易台在成交前知道對手，還是成交後才知道。',
+    kindNames: { pre: '事前披露', post: '事後披露' },
+    kindRows: [
+      ['交易台何時知道對手', '成交前：送出時，或場地來問時', '成交後：從成交回報'],
+      ['誰檢查額度', '交易台，逐筆', '場地，按交易台預設的限額'],
+      ['額度怎樣佔用', '這一筆通過檢查時預佔', '事先為場地預留（場地切片）'],
+      ['渠道', '詢價和持續報價。成交前會來問的訂單簿', '自己按限額成交的訂單簿'],
+    ],
     kindsWhere: {
       send: '詢價和持續報價：360T、FXGO。',
-      callback: '成交前會來問的訂單簿。',
-      channel: '按自己持有的限額成交的訂單簿：EBS Market。',
+      callback: '撮合後披露對手、並來問的訂單簿。',
+      channel: '成交後才披露對手的訂單簿：EBS Market。',
     },
     legend: '有底色的一步，是交易台決定額度夠不夠的地方。',
-    canHead: '場地檢查的渠道：做得到和做不到的',
+    canHead: '事後披露的渠道：做得到和做不到的',
     can: '做得到',
     canList: [
       '每個對手都不會超額。場地只在限額之內成交，而額度是先預留、後設限額。',
@@ -160,12 +178,39 @@ export function Design() {
 
       <h2>{t.kinds}</h2>
       <p>{t.kindsLead}</p>
-      <div className="grid-three">
-        {KINDS.map((kind) => (
-          <section key={kind}>
-            <h3>{flowTitle(lang, kind)}</h3>
-            <p className="quiet">{t.kindsWhere[kind]}</p>
-            <ChannelFlow kind={kind} />
+      <div className="table-wrap">
+        <table className="table text-table kinds-table">
+          <thead>
+            <tr>
+              <th />
+              <th>{t.kindNames.pre}</th>
+              <th>{t.kindNames.post}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {t.kindRows.map(([what, pre, post]) => (
+              <tr key={what}>
+                <th scope="row">{what}</th>
+                <td>{pre}</td>
+                <td>{post}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="kinds">
+        {KINDS.map(({ key, flows }) => (
+          <section key={key} className={flows.length > 1 ? 'kind kind-wide' : 'kind'}>
+            <h3>{t.kindNames[key]}</h3>
+            <div className="kind-flows">
+              {flows.map((flow) => (
+                <div key={flow}>
+                  <h4>{flowTitle(lang, flow)}</h4>
+                  <p className="quiet">{t.kindsWhere[flow]}</p>
+                  <ChannelFlow kind={flow} />
+                </div>
+              ))}
+            </div>
           </section>
         ))}
       </div>

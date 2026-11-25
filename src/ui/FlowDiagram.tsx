@@ -223,7 +223,7 @@ interface FlowCopy {
 const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
   en: {
     send: {
-      title: 'The desk checks before it sends',
+      title: 'Checked before sending',
       desc: 'Flow: an initial check, then the picked LP is checked and its room reserved in one step, the hedge is sent, and a fill turns the reservation into usage while a rejection releases it.',
       steps: [
         ['Initial check', 'ask only LPs that fit'],
@@ -234,7 +234,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [1],
     },
     callback: {
-      title: 'The desk checks after a match',
+      title: 'Checked after the match',
       desc: 'Flow: an order rests on the channel, the channel matches it and asks the desk, the desk checks and reserves and answers in time, and a fill turns the reservation into usage while a cancel releases it.',
       steps: [
         ['Order rests on the channel', 'counterparty not yet known'],
@@ -245,7 +245,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [2],
     },
     channel: {
-      title: 'The channel checks',
+      title: 'The channel fills within its limit',
       desc: 'Flow: the desk holds room on the line for the largest trade it allows and sets the channel limit to that trade, the channel matches and fills within that limit without asking, the fill report names the counterparty and the held room becomes usage, and the desk holds room again and raises the limit if the line has room, which leads back to the channel matching.',
       steps: [
         ['Hold room, then set the limit', 'the largest trade, per counterparty'],
@@ -259,7 +259,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
   },
   zh: {
     send: {
-      title: '交易台檢查，送出前',
+      title: '送出前檢查',
       desc: '流程：先做初步檢查；選定 LP 後檢查並預佔，一步完成；送出；成交後預佔轉為已用，被拒則釋放。',
       steps: [
         ['初步檢查', '只向放得進的 LP 詢價'],
@@ -270,7 +270,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [1],
     },
     callback: {
-      title: '交易台檢查，撮合後',
+      title: '撮合後檢查',
       desc: '流程：在場地掛單；場地撮合後來問交易台；交易台檢查並預佔，在時限內回覆；成交後預佔轉為已用，取消則釋放。',
       steps: [
         ['在場地掛單', '這時還不知道對手'],
@@ -281,7 +281,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [2],
     },
     channel: {
-      title: '場地檢查',
+      title: '場地按限額成交',
       desc: '流程：交易台先在額度上按最大一筆預留場地切片，再把場地限額設為這一筆的金額；場地在限額之內撮合並成交，不問交易台；成交回報披露對手，切片轉為已用；額度有空間，交易台就再預留並補回限額，然後回到場地撮合。',
       steps: [
         ['先預留場地切片', '再設場地限額：最大一筆'],

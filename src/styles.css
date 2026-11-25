@@ -195,9 +195,16 @@ body { margin: 0; background: #fafaf7; }
 .can-cannot h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .can-cannot ul { margin: 0; padding-left: 18px; }
 .can-cannot li { margin-bottom: 6px; }
-.grid-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 18px 0 20px; }
-.grid-three h3 { margin: 0 0 4px; }
-.grid-three .quiet { margin: 0 0 12px; min-height: 2.9em; }
+/* The flows of each kind of channel sit under that kind's name. */
+.kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 22px 0 20px; }
+.kind { border-top: 2px solid var(--ink); padding-top: 10px; min-width: 0; }
+.kind-wide { grid-column: span 2; }
+.kind > h3 { margin: 0 0 12px; font-weight: 600; }
+.kind-flows { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 28px; }
+.kind-flows h4 { margin: 0 0 4px; font-size: 15px; font-weight: 500; }
+.kind-flows .quiet { margin: 0 0 12px; min-height: 2.9em; }
+.table.text-table th[scope='row'] { font-size: 13px; white-space: nowrap; }
+.table.kinds-table thead th { font-size: 15px; font-weight: 600; color: var(--ink); }
 /* A diagram keeps its drawn size; on a narrow screen it scrolls inside its own frame. */
 .diagram { width: 100%; overflow-x: auto; }
 .diagram svg { display: block; width: 100%; min-width: 448px; height: auto; }
@@ -218,8 +225,10 @@ body { margin: 0; background: #fafaf7; }
   .lp-row { flex-direction: column; gap: 8px; }
   .line-row { grid-template-columns: 70px minmax(60px, 1fr) 118px; gap: 10px; }
   .stats, .grid-two { grid-template-columns: 1fr; gap: 0; }
-  .grid-three { grid-template-columns: 1fr; gap: 22px; }
-  .grid-three .quiet { min-height: 0; }
+  .kinds { grid-template-columns: 1fr; gap: 26px; }
+  .kind-wide { grid-column: auto; }
+  .kind-flows { grid-auto-flow: row; gap: 22px; }
+  .kind-flows .quiet { min-height: 0; }
   .concept td:first-child { min-width: 148px; }
   .concept .concept-bar { min-width: 72px; }
   .concept th, .concept td { padding-left: 6px; padding-right: 6px; }
