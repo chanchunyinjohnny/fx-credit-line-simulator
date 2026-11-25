@@ -37,7 +37,7 @@ const T = {
       `Adds USD ${psr} mio of pre-settlement risk${sr ? ` and up to ${sr} mio of settlement risk a day` : ''} to ${g}.`,
     psrOver: (k: string, a: string, l: string) => `Pre-settlement risk at ${k} would reach ${a} against a line of ${l}.`,
     srOver: (d: string, a: string, l: string) => `Settlement risk on ${d} would reach ${a} against a line of ${l}.`,
-    onlyReservation: ' It would fit without the hedge in flight: the reservation is what stops both from filling.',
+    onlyReservation: ' On its own this hedge would fit. Another hedge has been sent and has no answer yet, so its room is still held. If that one is rejected, this one fits.',
     bookFits: 'Every counterparty has room',
     bookBlocked: (g: string) => `No room with ${g}`,
     bookWhy: (ch: string, n: number) =>
@@ -123,7 +123,7 @@ const T = {
     adds: (psr: string, sr: string | null, g: string) => `${g}的交割前風險增加 ${psr} 百萬美元${sr ? `，結算風險每日最多增加 ${sr} 百萬美元` : ''}。`,
     psrOver: (k: string, a: string, l: string) => `${k} 期限檔的交割前風險將達 ${a}，額度只有 ${l}。`,
     srOver: (d: string, a: string, l: string) => `${d} 的結算風險將達 ${a}，額度只有 ${l}。`,
-    onlyReservation: '若沒有在途的那一筆，這筆本來放得進：正是預佔擋住了兩筆同時成交。',
+    onlyReservation: '這筆單獨放得進。但另一筆已經送出、還沒有結果，它的額度先留著。那一筆被拒絕的話，這筆就放得進。',
     bookFits: '每個對手都放得下',
     bookBlocked: (g: string) => `${g}的額度不夠`,
     bookWhy: (ch: string, n: number) => `${ch} 成交後才披露對手，交易台不能選對手。這張單可能和 ${n} 個對手之中任何一個成交，所以每一個都要檢查並預佔。`,
