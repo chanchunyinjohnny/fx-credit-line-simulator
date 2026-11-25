@@ -42,8 +42,8 @@ const T = {
     bookBlocked: (g: string) => `No room with ${g}`,
     bookWhy: (ch: string, n: number) =>
       `${ch} names the counterparty only after the trade, and the desk cannot choose it. The order could fill with any of ${n} counterparties, so it is checked against each and reserved on each.`,
-    bookCap: (ccy: string, x: string, g: string) => ` The largest order all of them have room for is ${ccy} ${x} mio. Or switch ${g} off on the channel, under the settings below.`,
-    bookCapNone: (g: string) => ` No size fits while ${g} is switched on at the channel.`,
+    bookCap: (ccy: string, x: string, g: string) => ` The largest order all of them have room for is ${ccy} ${x} mio. A larger one needs ${g} switched off at the channel, which only its credit administrator can do.`,
+    bookCapNone: (g: string) => ` No size fits while ${g} is switched on at the channel. The desk cannot keep one counterparty out on its own.`,
     bookOff: (ch: string) => `The check is switched off for ${ch}. The desk neither checks nor reserves: the channel fills on its own limits, and the desk books the fill afterwards.`,
     bookOffOver: (g: string) => ` A fill with ${g} would take a line over.`,
     place: 'Place and reserve',
@@ -89,7 +89,7 @@ const T = {
     offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
     books: 'Channels that name the counterparty after the trade',
     booksHint:
-      'An order there is checked against every counterparty switched on at the channel, and reserved on each. Switching a counterparty off is the channel’s own setting, kept by whoever administers credit there. With the check off, the desk relies on the channel’s limits alone and books fills afterwards.',
+      'An order there is checked against every counterparty switched on at the channel, and reserved on each. The desk cannot keep one counterparty out from its own side. Switching one off means whoever administers credit at the channel sets its limit there to zero; a tick removed below stands for that having been done. With the check off, the desk relies on the channel’s limits alone and books fills afterwards.',
     bookCheck: 'Check and reserve on every counterparty before placing an order',
     bookParties: 'Switched on at the channel',
     errors: {
@@ -127,8 +127,8 @@ const T = {
     bookFits: '每個對手都放得下',
     bookBlocked: (g: string) => `${g}的額度不夠`,
     bookWhy: (ch: string, n: number) => `${ch} 成交後才披露對手，交易台不能選對手。這張單可能和 ${n} 個對手之中任何一個成交，所以每一個都要檢查並預佔。`,
-    bookCap: (ccy: string, x: string, g: string) => `每個對手都放得下的最大金額是 ${ccy} ${x} 百萬。或者在下方設定裡，在場地上停用 ${g}。`,
-    bookCapNone: (g: string) => `只要 ${g}在場地上還開通，任何金額都放不下。`,
+    bookCap: (ccy: string, x: string, g: string) => `每個對手都放得下的最大金額是 ${ccy} ${x} 百萬。要掛更大的單，要由管理場地額度的人在場地上停用 ${g}。`,
+    bookCapNone: (g: string) => `只要 ${g}在場地上還開通，任何金額都放不下。交易台不能單獨擋住一個對手。`,
     bookOff: (ch: string) => `${ch} 的檢查已關掉。交易台不檢查、不預佔：場地按它自己的限額成交，成交後才記帳。`,
     bookOffOver: (g: string) => `和 ${g}成交會超出額度。`,
     place: '掛單並預佔額度',
@@ -173,7 +173,7 @@ const T = {
     addOn: '附加因子 %',
     offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
     books: '事後披露的場地',
-    booksHint: '掛到這類場地的訂單，會對場地上每個開通的對手檢查並預佔。停用對手是場地自己的設定，由管理場地額度的人維護。關掉檢查的話，交易台只靠場地的限額，成交後才記帳。',
+    booksHint: '掛到這類場地的訂單，會對場地上每個開通的對手檢查並預佔。交易台不能從自己這邊單獨擋住一個對手。停用對手，是管理場地額度的人在場地上把它的限額設為零；下面取消勾選，代表他們已經改了。關掉檢查的話，交易台只靠場地的限額，成交後才記帳。',
     bookCheck: '掛單前對每個對手檢查並預佔',
     bookParties: '在場地上開通的對手',
     errors: {

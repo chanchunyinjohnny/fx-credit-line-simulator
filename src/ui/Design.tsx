@@ -49,9 +49,9 @@ const T = {
     cannot: 'Cannot',
     cannotList: [
       'Choose the counterparty, or refuse a single trade.',
-      'Place an order larger than the tightest line allows. One counterparty short of room holds the whole order back, until it is switched off at the channel.',
+      'Place an order larger than the tightest line allows. One counterparty short of room cuts the whole order; once its line is full, no order can go to the channel.',
       'Leave the other lines free while an order is open. Each of them carries the reservation until the order is done.',
-      'Switch a counterparty off itself, unless the channel gives the desk that access. Today a person does it.',
+      'Keep one counterparty out on its own. The desk can only cut the order or stop sending orders to the whole channel. Excluding one counterparty means setting its limit at the channel to zero, which is done by whoever administers credit there.',
     ],
     switchText:
       'Each such channel has a switch. On, the desk checks and reserves as above. Off, it relies on the limits held at the channel and books fills afterwards: a line can then be exceeded, and the desk learns of it after the trade.',
@@ -115,9 +115,9 @@ const T = {
     cannot: '做不到',
     cannotList: [
       '選擇對手，或者拒絕個別成交。',
-      '掛出大過最緊那條額度容得下的單。一個對手額度不夠，整張單都要縮小，直到它在場地上被停用。',
+      '掛出大過最緊那條額度容得下的單。一個對手額度不夠，整張單都要縮小；它的額度用完，這個場地就一張單也掛不了。',
       '掛單期間不佔其他對手的額度。訂單未完結，每個可能成交的對手都留著這份預佔。',
-      '自己停用對手，除非場地給交易台這個權限。現時由人手做。',
+      '單獨擋住一個對手。交易台只能縮小訂單，或者整個場地停止下單。要排除一個對手，只能在場地上把它的限額設為零，這要由管理場地額度的人做。',
     ],
     switchText: '每個這類場地有一個開關。開：照上面的做法，掛單前檢查並預佔。關：只靠場地上的限額，成交後才記帳；額度可能被超出，而且交易台事後才知道。',
     ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 可用額度。',

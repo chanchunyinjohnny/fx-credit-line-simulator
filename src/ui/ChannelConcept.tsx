@@ -3,53 +3,51 @@ import { useLang } from './i18n';
 
 const M = 1_000_000;
 const LINE = 100;
-/** Three counterparties with a line of 100 each, and one order that would use 10 of whichever fills it.
+/** Three counterparties with a line of 100 each, and one order: first sized to use 10 of whoever fills it, then cut to 4.
  *  Each row is a moment; each cell is [in use, reserved, this order] for one counterparty. */
 const ROWS: [number, number, number][][] = [
   [[20, 0, 0], [60, 0, 0], [96, 0, 0]],
   [[20, 0, 10], [60, 0, 10], [96, 0, 10]],
-  [[20, 10, 0], [60, 10, 0], [96, 0, 0]],
-  [[20, 0, 0], [70, 0, 0], [96, 0, 0]],
+  [[20, 4, 0], [60, 4, 0], [96, 4, 0]],
+  [[20, 0, 0], [64, 0, 0], [96, 0, 0]],
 ];
 
 const T = {
   en: {
     head: 'One order, every counterparty that could fill it',
     lead: 'The desk cannot change who fills an order on such a channel, but an order never fills for more than its own amount. So it reserves that amount on each counterparty that could fill it. No limit held at the channel has to change.',
-    setup: `Example: three counterparties on the channel, each with a credit line of ${LINE}. The order would use 10 of the line of whoever fills it.`,
+    setup: `Example: three counterparties on the channel, each with a credit line of ${LINE}. An order uses the line of whoever fills it.`,
     step: 'Step',
     names: ['Bank X', 'Bank Y', 'Bank Z'],
     line: (n: string) => `${n} · line of ${LINE}`,
     steps: [
       ['Before the order', 'Any of the three could fill it'],
-      ['Check the order against each', 'Bank Z has no room, so the whole order is held back. The most that fits is 4'],
-      ['Switch Bank Z off at the channel, then place the order', 'Reserved on the two that could still fill it'],
-      ['The fill names Bank Y', 'Its reservation becomes usage. Bank X is released'],
+      ['Check an order that would use 10', 'Bank Z has no room, so the whole order is held back'],
+      ['Cut the order to 4, then place it', 'Reserved on all three'],
+      ['The fill names Bank Y', 'Its reservation becomes usage. Banks X and Z are released'],
     ],
     inUse: (x: number) => `${x} in use`,
     sum: (a: number, b: number, ok: boolean) => `${a} + ${b} = ${a + b}${ok ? '' : `, over ${LINE}`}`,
     reserved: (a: number, b: number) => `${a} in use, ${b} reserved`,
-    off: (x: number) => `${x} in use. Switched off`,
-    note: 'The counterparty with the tightest line sets how large the order can be. Switching it off at the channel is that channel’s own setting, done by whoever administers credit there, by hand or through the channel’s interface. Keeping within the lines does not depend on it.',
+    note: 'The counterparty with the tightest line sets how large the order can be. Once Bank Z’s line is full, no order can be placed on the channel at all. The desk cannot keep one counterparty out from its own side: it can only cut the order, or stop sending orders to the whole channel. Excluding Bank Z alone means setting its limit at the channel to zero, and that is done by whoever administers credit there.',
   },
   zh: {
     head: '一張訂單，每個可能成交的對手',
     lead: '在這類場地上，交易台改變不了誰來成交，但一張訂單最多成交它自己的金額。所以在每個可能成交的對手那裡，都預佔這個金額。場地上的限額不用改。',
-    setup: `例子：場地上有三個對手，授信額度各 ${LINE}。這張訂單和誰成交，就用掉誰的額度 10。`,
+    setup: `例子：場地上有三個對手，授信額度各 ${LINE}。一張訂單和誰成交，就用掉誰的額度。`,
     step: '步驟',
     names: ['甲銀行', '乙銀行', '丙銀行'],
     line: (n: string) => `${n} · 額度 ${LINE}`,
     steps: [
       ['掛單前', '三個對手都可能成交'],
-      ['對每個對手檢查這張訂單', '丙銀行放不下，所以整張單不能掛。最多只能掛 4'],
-      ['在場地上停用丙銀行，然後掛單', '在仍可能成交的兩個對手那裡預佔'],
-      ['成交回報：對手是乙銀行', '它的預佔轉為已用。甲銀行的預佔釋放'],
+      ['檢查一張要用 10 的訂單', '丙銀行放不下，所以整張單不能掛'],
+      ['把訂單縮小到 4，然後掛單', '在三個對手那裡各預佔 4'],
+      ['成交回報：對手是乙銀行', '它的預佔轉為已用。甲、丙銀行的預佔釋放'],
     ],
     inUse: (x: number) => `已用 ${x}`,
     sum: (a: number, b: number, ok: boolean) => `${a} + ${b} = ${a + b}${ok ? '' : `，超過 ${LINE}`}`,
     reserved: (a: number, b: number) => `已用 ${a}，預佔 ${b}`,
-    off: (x: number) => `已用 ${x}。已停用`,
-    note: '額度最緊的那個對手，決定訂單能做多大。在場地上停用它是場地自己的設定，由管理場地額度的人做，人手或經場地的介面都可以。不超額並不靠這一步。',
+    note: '額度最緊的那個對手，決定訂單能做多大。丙銀行的額度用完時，這個場地就一張單也掛不了。交易台不能從自己這邊單獨擋住一個對手：它只能縮小訂單，或者整個場地停止下單。要單獨排除丙銀行，只能在場地上把它的限額設為零，這要由管理場地額度的人做。',
   },
 } as const;
 
@@ -83,11 +81,10 @@ export function ChannelConcept() {
                 </td>
                 {cells.map(([used, reserved, order], k) => {
                   const total = used + reserved + order;
-                  const off = i >= 2 && k === 2;
                   return (
                     <td key={k} className="concept-bar">
                       <LineBar label={t.names[k]} line={LINE * M} parts={[used * M, reserved * M, order * M]} total={total * M} ok={total <= LINE} />
-                      <span>{order ? t.sum(used, order, total <= LINE) : reserved ? t.reserved(used, reserved) : off ? t.off(used) : t.inUse(used)}</span>
+                      <span>{order ? t.sum(used, order, total <= LINE) : reserved ? t.reserved(used, reserved) : t.inUse(used)}</span>
                     </td>
                   );
                 })}

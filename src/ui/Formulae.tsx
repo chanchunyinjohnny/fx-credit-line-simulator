@@ -3,7 +3,7 @@ import { PILLARS } from '../engine/calendar';
 import { CHANNELS } from '../engine/channels';
 import { defaultState } from '../engine/defaults';
 import { board, checkTrade, groupOf } from '../engine/lines';
-import { makeCtx, srByDate } from '../engine/risk';
+import { makeCtx, srByDate, valueTrade } from '../engine/risk';
 import { buildTrade, candidates, largestThatFits, reducer } from '../engine/state';
 import type { Ticket, Trade } from '../engine/types';
 import { Calc } from './bits';
@@ -59,7 +59,7 @@ const T = {
       },
       {
         title: 'A channel that discloses after the trade',
-        text: 'An order book matches first and names the counterparty afterwards. The desk cannot choose the counterparty or refuse a trade. What it does control is its own order: an order fills for no more than its own amount. So before placing it, the desk runs the same check against every counterparty that could fill it, and reserves on each. When the fill names the counterparty, that reservation becomes usage and the others are released. None of this needs the limits held at the channel to change. The cost is that the counterparty with the tightest line sets how large the order can be; to lift that, the counterparty has to be switched off at the channel.',
+        text: 'An order book matches first and names the counterparty afterwards. The desk cannot choose the counterparty or refuse a trade. What it does control is its own order: an order fills for no more than its own amount. So before placing it, the desk runs the same check against every counterparty that could fill it, and reserves on each. When the fill names the counterparty, that reservation becomes usage and the others are released. None of this needs the limits held at the channel to change. The cost is that the counterparty with the tightest line sets how large the order can be. The desk cannot keep one counterparty out from its own side: it can cut the order, or stop using the channel. Excluding one counterparty means setting its limit at the channel to zero, which is done by whoever administers credit there.',
         calcs: ['for every counterparty that could fill it: in use + reserved + this order ≤ credit line', 'largest order = the smallest of the amounts each counterparty has room for'],
       },
     ],
@@ -70,19 +70,19 @@ const T = {
       `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
     bk: 'A channel that discloses after the trade, step by step',
     bkIntro: (ch: string, n: number, size: string, tenor: string) => `${n} counterparties could fill an order on ${ch}. The desk places a USD/TWD NDF, ${tenor}, for USD ${size}.`,
-    bkSteps: ['Before placing: check every counterparty', 'The tightest line sets the largest order', 'Switch that counterparty off at the channel, then place and reserve', 'The fill: one becomes usage, the others are released'],
+    bkSteps: ['Before placing: check every counterparty', 'The tightest line sets the largest order', 'Cut the order to that size, then place and reserve', 'The fill: one becomes usage, the others are released'],
     bkRisk: (size: string, pct: string, e: string) => `what the order would use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
     bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
       `${g}: ${p} line ${line} − ${before} in use or reserved = ${room}, ${ok ? 'room for' : 'no room for'} ${e}`,
     bkBlocked: (g: string) => `${g} has no room, so the whole order is held back: the desk cannot choose who fills it.`,
     bkFit: (g: string, room: string, pct: string, x: string) => `${g} has room for ${room} ÷ ${pct}% = ${x}`,
     bkLargest: (x: string) => `largest order = the smallest of these = ${x}, to the thousand below`,
-    bkOff: (g: string) => `With ${g} switched off at the channel, the channel no longer matches the desk with it, and the order stops counting it.`,
+    bkCut: (x: string, pct: string, e: string) => `The desk cuts the order to USD ${x}. It would use ${x} × ${pct}% = USD ${e}.`,
     bkReserve: (g: string, p: string, line: string, res: string, room: string) => `${g}: ${p} line ${line} − ${res} reserved = ${room} left`,
     bkFill: (g: string) => `The channel reports the fill: it was with ${g}.`,
     bkUsed: (g: string, p: string, line: string, used: string, room: string) => `${g}: ${p} line ${line} − ${used} in use = ${room} left`,
     bkFreed: (g: string, p: string, room: string) => `${g}: reservation released, ${p} headroom back to ${room}`,
-    bkEnd: 'No limit held at the channel was changed at any point.',
+    bkEnd: (full: string, g: string) => `No limit held at the channel was changed at any point. Placing the full USD ${full} would need ${g} switched off at the channel, which only its credit administrator can do.`,
     more: 'Assumptions, limits and sources',
     notes: [
       'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
@@ -137,7 +137,7 @@ const T = {
       },
       {
         title: '事後披露的場地',
-        text: '訂單簿先撮合，成交後才披露對手。交易台不能選對手，也不能拒絕個別成交。交易台控制得了的是自己的訂單：一張訂單最多成交它自己的金額。所以掛單前，對場地上每個可能成交的對手都跑一次同樣的檢查，並在每一個那裡預佔。成交回報披露對手後，這個對手的預佔轉為已用，其餘的釋放。這不需要改動場地上的限額。代價是額度最緊的那個對手決定訂單能做多大；要解除，就要在場地上停用這個對手。',
+        text: '訂單簿先撮合，成交後才披露對手。交易台不能選對手，也不能拒絕個別成交。交易台控制得了的是自己的訂單：一張訂單最多成交它自己的金額。所以掛單前，對場地上每個可能成交的對手都跑一次同樣的檢查，並在每一個那裡預佔。成交回報披露對手後，這個對手的預佔轉為已用，其餘的釋放。這不需要改動場地上的限額。代價是額度最緊的那個對手決定訂單能做多大。交易台不能從自己這邊單獨擋住一個對手：它只能縮小訂單，或者不用這個場地。要排除一個對手，只能在場地上把它的限額設為零，這要由管理場地額度的人做。',
         calcs: ['每個可能成交的對手：已用 + 預佔 + 本筆 ≤ 授信額度', '可掛的最大金額 = 各對手放得下的金額之中最小的一個'],
       },
     ],
@@ -148,19 +148,19 @@ const T = {
       `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
     bk: '事後披露的場地，逐步計算',
     bkIntro: (ch: string, n: number, size: string, tenor: string) => `${ch} 上有 ${n} 個對手可能成交。交易台掛一張 USD/TWD NDF，${tenor}，USD ${size}。`,
-    bkSteps: ['掛單前：對每個對手檢查', '額度最緊的對手決定最大金額', '在場地上停用這個對手，然後掛單並預佔', '成交回報：一個轉為已用，其餘釋放'],
+    bkSteps: ['掛單前：對每個對手檢查', '額度最緊的對手決定最大金額', '把訂單縮小到這個金額，然後掛單並預佔', '成交回報：一個轉為已用，其餘釋放'],
     bkRisk: (size: string, pct: string, e: string) => `這張單要用的額度 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
     bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
       `${g}：${p} 額度 ${line} − 已用和預佔 ${before} = ${room}，${ok ? '放得下' : '放不下'} ${e}`,
     bkBlocked: (g: string) => `${g}放不下，所以整張單不能掛：交易台不能選誰來成交。`,
     bkFit: (g: string, room: string, pct: string, x: string) => `${g}放得下 ${room} ÷ ${pct}% = ${x}`,
     bkLargest: (x: string) => `可掛的最大金額 = 以上最小的一個 = ${x}（取整到千位）`,
-    bkOff: (g: string) => `${g}在場地上停用後，場地不會再和它撮合，掛單時不用再計它。`,
+    bkCut: (x: string, pct: string, e: string) => `交易台把訂單縮小到 USD ${x}。它要用的額度 = ${x} × ${pct}% = USD ${e}。`,
     bkReserve: (g: string, p: string, line: string, res: string, room: string) => `${g}：${p} 額度 ${line} − 預佔 ${res} = 尚餘 ${room}`,
     bkFill: (g: string) => `場地回報成交：對手是 ${g}。`,
     bkUsed: (g: string, p: string, line: string, used: string, room: string) => `${g}：${p} 額度 ${line} − 已用 ${used} = 尚餘 ${room}`,
     bkFreed: (g: string, p: string, room: string) => `${g}：預佔釋放，${p} 可用額度回到 ${room}`,
-    bkEnd: '全程沒有改過場地上的限額。',
+    bkEnd: (full: string, g: string) => `全程沒有改過場地上的限額。要掛足 USD ${full}，就要由管理場地額度的人在場地上停用 ${g}。`,
     more: '假設、限制與資料來源',
     notes: [
       '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
@@ -206,9 +206,9 @@ function buildBookExample() {
   const blocker = before.find((b) => !b.ok)!;
   const largest = largestThatFits(ctx, s0, BOOK_ORDER);
 
-  const off = reducer(s0, { type: 'SWITCH_ON_CHANNEL', lpId: blocker.lpId, on: false });
-  const placed = reducer(off, { type: 'SEND', ticket: BOOK_ORDER });
-  const filler = placed.trades[placed.trades.length - 1];
+  // The desk cannot keep the blocker out, so it places what the tightest line can take.
+  const placed = reducer(s0, { type: 'SEND', ticket: { ...BOOK_ORDER, amount: largest } });
+  const filler = placed.trades[1];
   const filled = reducer(placed, { type: 'FILL', id: filler.id });
   return {
     channel: CHANNELS[BOOK_ORDER.book!].label,
@@ -217,6 +217,7 @@ function buildBookExample() {
     before,
     blocker,
     largest,
+    cut: valueTrade(ctx, placed.trades[0]),
     placed: placed.trades.map((t) => at(placed, t.lpId)),
     after: placed.trades.map((t) => ({ ...at(filled, t.lpId), filled: t.id === filler.id })),
   };
@@ -299,7 +300,7 @@ export function Formulae() {
       ))}
       <Calc>{t.bkLargest(amt(bk.largest))}</Calc>
       <h3>3. {t.bkSteps[2]}</h3>
-      <p>{t.bkOff(who(bk.blocker.group))}</p>
+      <p>{t.bkCut(amt(bk.cut.notionalUsd), String(bk.cut.addOnPct), amt(bk.cut.exposure))}</p>
       {bk.placed.map((b) => (
         <Calc key={b.lpId}>{t.bkReserve(who(b.group), bk.pillar, amt(b.row.line), amt(b.row.reserved), amt(b.row.headroom))}</Calc>
       ))}
@@ -308,7 +309,7 @@ export function Formulae() {
       {bk.after.map((a) => (
         <Calc key={a.lpId}>{a.filled ? t.bkUsed(who(a.group), bk.pillar, amt(a.row.line), amt(a.row.used), amt(a.row.headroom)) : t.bkFreed(who(a.group), bk.pillar, amt(a.row.headroom))}</Calc>
       ))}
-      <p>{t.bkEnd}</p>
+      <p>{t.bkEnd(amt(BOOK_ORDER.amount), who(bk.blocker.group))}</p>
 
       <details className="more">
         <summary>{t.more}</summary>
