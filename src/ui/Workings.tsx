@@ -17,7 +17,6 @@ interface Props {
   group: Group;
   isNew: boolean; // a ticket not yet sent: rates are today's, so their build-up can be shown
   openFrom?: number; // steps from this number on start open; none when left out
-  held?: number[]; // room held for channels on each pillar, counted against the line with the exposure
 }
 
 const T = {
@@ -107,7 +106,6 @@ const T = {
       offset ? `exposure = max(${s} + ${n}, 0) = max(${mid}, 0) = USD ${e}` : `exposure = max(${s}, 0) + ${n} = ${mid} + ${n} = USD ${e}`,
     psrAgainst: (p: string, l: string, e: string, rest: string, over: string | null) =>
       over ? `${p} line ${l} − ${e}: over by ${over}` : `${p} line ${l} − ${e} = ${rest} left`,
-    heldToo: (h: string) => ` − ${h} held for a channel`,
     psrHead: ['Pillar', 'Hedges counted', 'Σ market value', 'Gross add-on', 'NGR', 'Net add-on', 'Exposure', 'Line'],
     s7: (g: string) => `Settlement risk of ${g}`,
     atMost: (x: string) => `USD ${x} at most`,
@@ -207,7 +205,6 @@ const T = {
       offset ? `風險敞口 = max(${s} + ${n}, 0) = max(${mid}, 0) = USD ${e}` : `風險敞口 = max(${s}, 0) + ${n} = ${mid} + ${n} = USD ${e}`,
     psrAgainst: (p: string, l: string, e: string, rest: string, over: string | null) =>
       over ? `${p} 額度 ${l} − ${e}：超出 ${over}` : `${p} 額度 ${l} − ${e} = 尚餘 ${rest}`,
-    heldToo: (h: string) => ` − 場地切片 ${h}`,
     psrHead: ['期限檔', '計入筆數', 'Σ 市值', '附加金額總和', 'NGR', '淨附加金額', '風險敞口', '額度'],
     s7: (g: string) => `${g}的結算風險`,
     atMost: (x: string) => `最高 USD ${x}`,
@@ -352,7 +349,7 @@ function ImpliedRate({ ctx, trade, curve, lang }: { ctx: Ctx; trade: Trade; curv
   );
 }
 
-export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom, held }: Props) {
+export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom }: Props) {
   const lang = useLang();
   const t = T[lang];
   const info = PAIRS[trade.pair];
@@ -367,7 +364,6 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom, h
   const baseUsd = usdPerUnit(ctx.market, info.base);
   const own = risk.pillar;
   const agg = own >= 0 ? measured.psr[own] : undefined;
-  const heldOwn = own >= 0 ? (held?.[own] ?? 0) : 0;
   const counted = measured.risks.filter((x) => own >= 0 && x.pillar >= own);
   const srDays = trade.legs
     .filter((l) => l.date >= ctx.t0 && settlesGross(trade, l))
@@ -552,9 +548,9 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom, h
               {t.psrAgainst(
                 PILLARS[own],
                 amt(group.psrLines[own]),
-                amt(agg.exposure) + (heldOwn > 0.5 ? t.heldToo(amt(heldOwn)) : ''),
-                amt(group.psrLines[own] - agg.exposure - heldOwn),
-                agg.exposure + heldOwn <= group.psrLines[own] ? null : amt(agg.exposure + heldOwn - group.psrLines[own]),
+                amt(agg.exposure),
+                amt(group.psrLines[own] - agg.exposure),
+                agg.exposure <= group.psrLines[own] ? null : amt(agg.exposure - group.psrLines[own]),
               )}
             </Calc>
           </div>

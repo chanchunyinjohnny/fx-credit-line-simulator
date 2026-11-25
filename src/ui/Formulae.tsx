@@ -1,9 +1,10 @@
 import { useMemo, type ReactNode } from 'react';
-import { defaultState } from '../engine/defaults';
+import { PILLARS } from '../engine/calendar';
 import { CHANNELS } from '../engine/channels';
-import { board, channelFill, checkTrade } from '../engine/lines';
+import { defaultState } from '../engine/defaults';
+import { board, checkTrade, groupOf } from '../engine/lines';
 import { makeCtx, srByDate } from '../engine/risk';
-import { buildTrade, reducer } from '../engine/state';
+import { buildTrade, candidates, largestThatFits, reducer } from '../engine/state';
 import type { Ticket, Trade } from '../engine/types';
 import { Calc } from './bits';
 import { amt, day, mio, partyName, rate, signedAmt } from './format';
@@ -13,7 +14,7 @@ import { Workings } from './Workings';
 const M = 1_000_000;
 const EXAMPLE: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 20 * M, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
 const LATER_SPOT = 1.1767; // 1% above the starting 1.1650
-const CHANNEL_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 10 * M, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' };
+const BOOK_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 20 * M, tenor: '6M', lpId: 'A-LDN-360T', book: 'EBSM', settlement: 'AUTO' };
 
 const T = {
   en: {
@@ -53,12 +54,12 @@ const T = {
       {
         title: 'The check',
         text: 'A hedge goes out only if every pillar and date stays within its line. Sending reserves the room until the LP fills or rejects. With no answer after 5 seconds the venue is asked, and the room stays reserved until it confirms no trade.',
-        calcs: ["headroom = credit line − earlier days − today's fills − reservations − room held for channels"],
+        calcs: ["headroom = credit line − earlier days − today's fills − reservations"],
       },
       {
         title: 'A channel that discloses after the trade',
-        text: 'An order book matches first and names the counterparty afterwards, so the desk cannot check each trade. But the channel fills only within the limit the desk has set there. That limit is the largest trade the desk allows. The desk holds the room that trade would use on the credit line first, then sets the limit. A fill turns the held room into usage, exactly as a reservation does. The desk then holds room again and sets the limit back. As the line fills the limit shrinks; at zero the channel stops filling with that counterparty. The channel limit is one trade amount for every tenor, while the add-on rises with tenor. With orders of several tenors there, the desk holds for the longest; if a shorter one fills, the excess comes back when it is booked.',
-        calcs: ['channel limit = min(largest trade, free room on the line ÷ add-on %)', 'room held = channel limit × add-on % of the longest order sent there'],
+        text: 'An order book matches first and names the counterparty afterwards. The desk cannot choose the counterparty or refuse a trade. What it does control is its own order: an order fills for no more than its own amount. So before placing it, the desk runs the same check against every counterparty that could fill it, and reserves on each. When the fill names the counterparty, that reservation becomes usage and the others are released. None of this needs the limits held at the channel to change. The cost is that the counterparty with the tightest line sets how large the order can be; to lift that, the counterparty has to be switched off at the channel.',
+        calcs: ['for every counterparty that could fill it: in use + reserved + this order ≤ credit line', 'largest order = the smallest of the amounts each counterparty has room for'],
       },
     ],
     steps: 'The same swap, step by step',
@@ -66,22 +67,21 @@ const T = {
     later: (r: string) => `A week later, spot up 1% to ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
-    ch: 'A channel that discloses after the trade, step by step',
-    chIntro: (ch: string, g: string, line: string, keep: string) =>
-      `The example drawn on the Design view, in dollars. ${ch} with ${g}: a 1M credit line of USD ${line}. The desk sends one order there, USD/TWD NDF 1M, and allows a trade of up to USD ${keep}. The channel limit is a trade amount and the credit line is a risk amount; the add-on converts one into the other.`,
-    chUses: (keep: string, pct: string, held: string) => `the largest trade uses ${keep} × ${pct}% = USD ${held} of the line`,
-    chSuppose: (g: string, fill: string) => `Suppose the channel matches a trade of USD ${fill} with ${g}: the largest it may.`,
-    chSteps: ['Before any fill: hold room, then set the limit', 'The channel fills an order', 'The fill report: book it, then top up', 'When the line runs short'],
-    chHeld: (avail: string, pct: string, held: string, to: string) => `room held = channel limit ${avail} × ${pct}% = USD ${held}, on the ${to} line and every shorter one`,
-    chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} line ${line} − ${used} in use − ${held} held = ${rest} left`,
-    chAtChannel: (avail: string, fill: string, rest: string) => `at the channel: limit ${avail} − ${fill} filled = ${rest}. The desk does not yet know with whom.`,
-    chSafe: (e: string, held: string) => `the most this can add is ${e}, and ${held} is already held: the line cannot be exceeded`,
-    chBook: (size: string, pct: string, e: string) => `in use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
-    chFree: (p: string, line: string, used: string, room: string) => `free room on the ${p} line = ${line} − ${used} in use = ${room}`,
-    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `channel limit = min(largest trade ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
-    chCost: (before: string, after: string) => `The fill has come out of headroom: ${before} before, ${after} after. The room held is the same as before.`,
-    chShortIntro: (used: string) => `After more fills, ${used} is in use.`,
-    chStop: (p: string, line: string, used: string) => `Once ${used} of the ${p} line of ${line} is in use, free room is 0 and the channel limit is 0. The channel no longer fills with this group, and nothing went over the line.`,
+    bk: 'A channel that discloses after the trade, step by step',
+    bkIntro: (ch: string, n: number, size: string, tenor: string) => `${n} counterparties could fill an order on ${ch}. The desk places a USD/TWD NDF, ${tenor}, for USD ${size}.`,
+    bkSteps: ['Before placing: check every counterparty', 'The tightest line sets the largest order', 'Switch that counterparty off at the channel, then place and reserve', 'The fill: one becomes usage, the others are released'],
+    bkRisk: (size: string, pct: string, e: string) => `what the order would use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
+      `${g}: ${p} line ${line} − ${before} in use or reserved = ${room}, ${ok ? 'room for' : 'no room for'} ${e}`,
+    bkBlocked: (g: string) => `${g} has no room, so the whole order is held back: the desk cannot choose who fills it.`,
+    bkFit: (g: string, room: string, pct: string, x: string) => `${g} has room for ${room} ÷ ${pct}% = ${x}`,
+    bkLargest: (x: string) => `largest order = the smallest of these = ${x}, to the thousand below`,
+    bkOff: (g: string) => `With ${g} switched off at the channel, the channel no longer matches the desk with it, and the order stops counting it.`,
+    bkReserve: (g: string, p: string, line: string, res: string, room: string) => `${g}: ${p} line ${line} − ${res} reserved = ${room} left`,
+    bkFill: (g: string) => `The channel reports the fill: it was with ${g}.`,
+    bkUsed: (g: string, p: string, line: string, used: string, room: string) => `${g}: ${p} line ${line} − ${used} in use = ${room} left`,
+    bkFreed: (g: string, p: string, room: string) => `${g}: reservation released, ${p} headroom back to ${room}`,
+    bkEnd: 'No limit held at the channel was changed at any point.',
     more: 'Assumptions, limits and sources',
     notes: [
       'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
@@ -90,7 +90,7 @@ const T = {
       'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a payment due on the day it is dealt always counts in full. The other leg can still go through CLS.',
       'The implied interest rate uses Actual/365 for GBP and Actual/360 for USD, EUR, JPY and CNH. Actual/365 for TWD is not confirmed.',
       'The holiday tables have no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
-      'EBS Market matches orders only where both sides hold credit for each other on the platform, and names the counterparty after the trade (EBS Dealing Rules, EBS Market appendix; EBS disclosure cover sheet). Sizing the room held by one add-on, and a single order type per channel, are simplifications of this app.',
+      'EBS Market matches orders only where both sides hold credit for each other on the platform, and names the counterparty after the trade (EBS Dealing Rules, EBS Market appendix; EBS disclosure cover sheet). Reserving for the whole order with every counterparty switched on there is the worst case. This app sends one product to the channel, NDFs, and fills an order once, in full.',
       'Every assumption is listed in the design notes in the source repository.',
     ],
   },
@@ -135,8 +135,8 @@ const T = {
       },
       {
         title: '事後披露的場地',
-        text: '訂單簿先撮合，成交後才知道對手，交易台不能逐筆檢查。但場地只會在交易台設定的限額之內成交。這個限額就是交易台容許的最大一筆。交易台先在授信額度上預留這一筆要用的額度（場地切片），再設限額。成交後，這份切片轉為已用，和預佔轉為已用一樣。交易台隨即再預留，把限額設回來。額度越滿，限額越小；到零時，場地不再和這個對手成交。場地限額是一個交易金額，不分期限；附加因子卻是期限越長越大。在場地上掛了幾種期限的訂單時，按最長的那種預留；成交的若是較短的，多留的在記帳後退回。',
-        calcs: ['場地限額 = min(最大一筆, 額度上的空間 ÷ 附加因子 %)', '場地切片 = 場地限額 × 送往該場地最長期限訂單的附加因子 %'],
+        text: '訂單簿先撮合，成交後才披露對手。交易台不能選對手，也不能拒絕個別成交。交易台控制得了的是自己的訂單：一張訂單最多成交它自己的金額。所以掛單前，對場地上每個可能成交的對手都跑一次同樣的檢查，並在每一個那裡預佔。成交回報披露對手後，這個對手的預佔轉為已用，其餘的釋放。這不需要改動場地上的限額。代價是額度最緊的那個對手決定訂單能做多大；要解除，就要在場地上停用這個對手。',
+        calcs: ['每個可能成交的對手：已用 + 預佔 + 本筆 ≤ 授信額度', '可掛的最大金額 = 各對手放得下的金額之中最小的一個'],
       },
     ],
     steps: '同一筆掉期，逐步計算',
@@ -144,22 +144,21 @@ const T = {
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
-    ch: '事後披露的場地，逐步計算',
-    chIntro: (ch: string, g: string, line: string, keep: string) =>
-      `和流程設計頁的示意圖是同一個例子，單位換成美元。${ch} 對 ${g}：1M 授信額度 USD ${line}。交易台只送一種訂單到這個場地（USD/TWD NDF，1M），一筆最多做 USD ${keep}。場地限額是交易金額，授信額度是風險金額，兩者用附加因子換算。`,
-    chUses: (keep: string, pct: string, held: string) => `最大一筆用掉的額度 = ${keep} × ${pct}% = USD ${held}`,
-    chSuppose: (g: string, fill: string) => `假設場地和 ${g}撮合了一筆 USD ${fill}，即最大的一筆。`,
-    chSteps: ['成交之前：先預留，再設限額', '場地成交一張訂單', '成交回報：記帳，然後補回', '額度快用完的時候'],
-    chHeld: (avail: string, pct: string, held: string, to: string) => `場地切片 = 場地限額 ${avail} × ${pct}% = USD ${held}，佔 ${to} 及所有更短的期限檔`,
-    chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} 額度 ${line} − 已用 ${used} − 場地切片 ${held} = 尚餘 ${rest}`,
-    chAtChannel: (avail: string, fill: string, rest: string) => `場地上：限額 ${avail} − 成交 ${fill} = ${rest}。交易台這時還不知道對手是誰。`,
-    chSafe: (e: string, held: string) => `這筆最多增加 ${e}，而額度上已經預留了 ${held}：不可能超額`,
-    chBook: (size: string, pct: string, e: string) => `已用 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
-    chFree: (p: string, line: string, used: string, room: string) => `${p} 額度上的空間 = ${line} − 已用 ${used} = ${room}`,
-    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `場地限額 = min(最大一筆 ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
-    chCost: (before: string, after: string) => `這筆成交用掉的是可用額度：之前 ${before}，之後 ${after}。場地切片和成交前一樣。`,
-    chShortIntro: (used: string) => `之後再成交幾筆，已用到 ${used}。`,
-    chStop: (p: string, line: string, used: string) => `到 ${p} 額度 ${line} 已用 ${used} 時，空間是 0，場地限額是 0。場地不再和這個集團成交，全程沒有超出額度。`,
+    bk: '事後披露的場地，逐步計算',
+    bkIntro: (ch: string, n: number, size: string, tenor: string) => `${ch} 上有 ${n} 個對手可能成交。交易台掛一張 USD/TWD NDF，${tenor}，USD ${size}。`,
+    bkSteps: ['掛單前：對每個對手檢查', '額度最緊的對手決定最大金額', '在場地上停用這個對手，然後掛單並預佔', '成交回報：一個轉為已用，其餘釋放'],
+    bkRisk: (size: string, pct: string, e: string) => `這張單要用的額度 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
+      `${g}：${p} 額度 ${line} − 已用和預佔 ${before} = ${room}，${ok ? '放得下' : '放不下'} ${e}`,
+    bkBlocked: (g: string) => `${g}放不下，所以整張單不能掛：交易台不能選誰來成交。`,
+    bkFit: (g: string, room: string, pct: string, x: string) => `${g}放得下 ${room} ÷ ${pct}% = ${x}`,
+    bkLargest: (x: string) => `可掛的最大金額 = 以上最小的一個 = ${x}（取整到千位）`,
+    bkOff: (g: string) => `${g}在場地上停用後，場地不會再和它撮合，掛單時不用再計它。`,
+    bkReserve: (g: string, p: string, line: string, res: string, room: string) => `${g}：${p} 額度 ${line} − 預佔 ${res} = 尚餘 ${room}`,
+    bkFill: (g: string) => `場地回報成交：對手是 ${g}。`,
+    bkUsed: (g: string, p: string, line: string, used: string, room: string) => `${g}：${p} 額度 ${line} − 已用 ${used} = 尚餘 ${room}`,
+    bkFreed: (g: string, p: string, room: string) => `${g}：預佔釋放，${p} 可用額度回到 ${room}`,
+    bkEnd: '全程沒有改過場地上的限額。',
     more: '假設、限制與資料來源',
     notes: [
       '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
@@ -168,7 +167,7 @@ const T = {
       'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以當日交收的款項一律計全額。另一邊仍可經 CLS。',
       '隱含利率的計息日數：GBP 用 Actual/365，USD、EUR、JPY、CNH 用 Actual/360；TWD 用 Actual/365，未經證實。',
       '假期表沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
-      'EBS Market 只在雙方於平台上互有額度時才撮合，成交後才披露對手（EBS Dealing Rules 的 EBS Market 附錄；EBS 的平台披露表）。以單一附加因子計算場地切片，以及每個場地只接受一種訂單，是本程式的簡化。',
+      'EBS Market 只在雙方於平台上互有額度時才撮合，成交後才披露對手（EBS Dealing Rules 的 EBS Market 附錄；EBS 的平台披露表）。對場地上每個開通的對手都按整張訂單預佔，是最壞情況。本程式只送 NDF 到這個場地，而且一張訂單只成交一次、全數成交。',
       '所有假設都列在原始碼倉庫的設計說明裡。',
     ],
   },
@@ -190,31 +189,35 @@ function buildExample() {
   return { s0, ctx0, trade, check, ifGross, s1, ctx1, measured1, filled: s1.trades[0], risk1: measured1.risks[0] };
 }
 
-/** One channel followed through a fill and its top-up, then to the point where the line is nearly full. */
-function buildChannelExample() {
-  const view = (s: ReturnType<typeof defaultState>) => {
-    const b = board(makeCtx(s), s, 'B');
-    const a = b.allocations[0];
-    const psr = b.psr[a.pillar];
-    return { a, psr, inUse: psr.used - psr.allocated };
+/** One order on a book, from the check on every counterparty through the fill with one of them. */
+function buildBookExample() {
+  const s0 = defaultState();
+  const ctx = makeCtx(s0);
+  const checks = (candidates(ctx, s0, BOOK_ORDER) as Trade[]).map((t) => checkTrade(ctx, s0, t));
+  const { risk } = checks[0];
+  // Lines shrink with tenor, so the order's own pillar is the one that binds.
+  const at = (s: ReturnType<typeof defaultState>, lpId: string) => {
+    const group = groupOf(s, lpId);
+    return { lpId, group, row: board(makeCtx(s), s, group.id).psr[risk.pillar] };
   };
-  // The line of 100 and the trade of 10 drawn on the Design view, in dollars:
-  // a 1M line of 1 mio, and a largest trade of 10 mio that uses 1% of its amount.
-  let s0 = reducer(defaultState(), { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = M) });
-  s0 = reducer(s0, { type: 'SET_CHANNEL_BUFFER', channel: 'EBSM', groupId: 'B', keepUsd: CHANNEL_ORDER.amount });
-  const ctx0 = makeCtx(s0);
-  const before = view(s0);
-  const fill = channelFill(ctx0, s0, buildTrade(ctx0, CHANNEL_ORDER) as Trade);
-  let s = reducer(s0, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
-  const after = view(s);
+  const before = checks.map((c) => ({ ...at(s0, c.trade.lpId), check: c.psr[risk.pillar], ok: c.ok }));
+  const blocker = before.find((b) => !b.ok)!;
+  const largest = largestThatFits(ctx, s0, BOOK_ORDER);
 
-  // Eight more trades of that size and one of half the size leave room for half a trade.
-  const half = { ...CHANNEL_ORDER, amount: CHANNEL_ORDER.amount / 2 };
-  for (let i = 0; i < 8; i++) s = reducer(s, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
-  s = reducer(s, { type: 'CHANNEL_FILL', ticket: half });
-  const short = view(s);
-  const full = view(reducer(s, { type: 'CHANNEL_FILL', ticket: half }));
-  return { group: s0.groups[1], channel: CHANNELS[before.a.buffer.channel].label, before, fill, after, short, full };
+  const off = reducer(s0, { type: 'SWITCH_ON_CHANNEL', lpId: blocker.lpId, on: false });
+  const placed = reducer(off, { type: 'SEND', ticket: BOOK_ORDER });
+  const filler = placed.trades[placed.trades.length - 1];
+  const filled = reducer(placed, { type: 'FILL', id: filler.id });
+  return {
+    channel: CHANNELS[BOOK_ORDER.book!].label,
+    risk,
+    pillar: PILLARS[risk.pillar],
+    before,
+    blocker,
+    largest,
+    placed: placed.trades.map((t) => at(placed, t.lpId)),
+    after: placed.trades.map((t) => ({ ...at(filled, t.lpId), filled: t.id === filler.id })),
+  };
 }
 
 function Method({ title, children }: { title: string; children: ReactNode }) {
@@ -230,7 +233,8 @@ export function Formulae() {
   const lang = useLang();
   const t = T[lang];
   const ex = useMemo(buildExample, []);
-  const ch = useMemo(buildChannelExample, []);
+  const bk = useMemo(buildBookExample, []);
+  const who = (g: { name: string }) => partyName(g.name, lang);
   const [near, far] = ex.trade.legs;
 
   return (
@@ -277,45 +281,32 @@ export function Formulae() {
       </p>
       <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} openFrom={4} />
 
-      <h2>{t.ch}</h2>
-      <p>{t.chIntro(ch.channel, partyName(ch.group.name, lang), amt(ch.before.psr.line), amt(ch.before.a.buffer.keepUsd))}</p>
-      <Calc>{t.chUses(amt(ch.before.a.buffer.keepUsd), String(ch.before.a.addOnPct), amt((ch.before.a.buffer.keepUsd * ch.before.a.addOnPct) / 100))}</Calc>
-      <h3>1. {t.chSteps[0]}</h3>
-      <Calc>{t.chHeld(amt(ch.before.a.available), String(ch.before.a.addOnPct), amt(ch.before.a.held), ch.before.psr.key)}</Calc>
-      <Calc>{t.chRoom(ch.before.psr.key, amt(ch.before.psr.line), amt(ch.before.inUse), amt(ch.before.psr.allocated), amt(ch.before.psr.headroom))}</Calc>
-      <h3>2. {t.chSteps[1]}</h3>
-      <p>{t.chSuppose(partyName(ch.group.name, lang), amt(ch.fill.fillUsd))}</p>
-      <Calc>{t.chAtChannel(amt(ch.fill.available), amt(ch.fill.fillUsd), amt(ch.fill.available - ch.fill.fillUsd))}</Calc>
-      <Calc>{t.chSafe(amt(ch.fill.risk!.exposure), amt(ch.before.a.held))}</Calc>
-      <h3>3. {t.chSteps[2]}</h3>
-      <Calc>{t.chBook(amt(ch.fill.fillUsd), String(ch.fill.risk!.addOnPct), amt(ch.fill.risk!.exposure))}</Calc>
-      <Calc>{t.chFree(ch.after.psr.key, amt(ch.after.psr.line), amt(ch.after.inUse), amt(ch.after.psr.line - ch.after.inUse))}</Calc>
-      <Calc>
-        {t.chAvail(
-          amt(ch.after.a.buffer.keepUsd),
-          amt(ch.after.psr.line - ch.after.inUse),
-          String(ch.after.a.addOnPct),
-          amt(((ch.after.psr.line - ch.after.inUse) / ch.after.a.addOnPct) * 100),
-          amt(ch.after.a.available),
-        )}
-      </Calc>
-      <Calc>{t.chHeld(amt(ch.after.a.available), String(ch.after.a.addOnPct), amt(ch.after.a.held), ch.after.psr.key)}</Calc>
-      <Calc>{t.chRoom(ch.after.psr.key, amt(ch.after.psr.line), amt(ch.after.inUse), amt(ch.after.psr.allocated), amt(ch.after.psr.headroom))}</Calc>
-      <p>{t.chCost(amt(ch.before.psr.headroom), amt(ch.after.psr.headroom))}</p>
-      <h3>4. {t.chSteps[3]}</h3>
-      <p>{t.chShortIntro(amt(ch.short.inUse))}</p>
-      <Calc>{t.chFree(ch.short.psr.key, amt(ch.short.psr.line), amt(ch.short.inUse), amt(ch.short.psr.line - ch.short.inUse))}</Calc>
-      <Calc>
-        {t.chAvail(
-          amt(ch.short.a.buffer.keepUsd),
-          amt(ch.short.psr.line - ch.short.inUse),
-          String(ch.short.a.addOnPct),
-          amt(((ch.short.psr.line - ch.short.inUse) / ch.short.a.addOnPct) * 100),
-          amt(ch.short.a.available),
-        )}
-      </Calc>
-      <Calc>{t.chHeld(amt(ch.short.a.available), String(ch.short.a.addOnPct), amt(ch.short.a.held), ch.short.psr.key)}</Calc>
-      <p>{t.chStop(ch.full.psr.key, amt(ch.full.psr.line), amt(ch.full.inUse))}</p>
+      <h2>{t.bk}</h2>
+      <p>{t.bkIntro(bk.channel, bk.before.length, amt(BOOK_ORDER.amount), BOOK_ORDER.tenor)}</p>
+      <h3>1. {t.bkSteps[0]}</h3>
+      <Calc>{t.bkRisk(amt(bk.risk.notionalUsd), String(bk.risk.addOnPct), amt(bk.risk.exposure))}</Calc>
+      {bk.before.map((b) => (
+        <Calc key={b.lpId}>{t.bkCheck(who(b.group), bk.pillar, amt(b.check.line), amt(b.check.before), amt(b.check.line - b.check.before), amt(bk.risk.exposure), b.ok)}</Calc>
+      ))}
+      <p>{t.bkBlocked(who(bk.blocker.group))}</p>
+      <h3>2. {t.bkSteps[1]}</h3>
+      {bk.before.map((b) => (
+        <Calc key={b.lpId}>
+          {t.bkFit(who(b.group), amt(b.check.line - b.check.before), String(bk.risk.addOnPct), amt(Math.floor(((b.check.line - b.check.before) / bk.risk.addOnPct) * 100 + 1e-6)))}
+        </Calc>
+      ))}
+      <Calc>{t.bkLargest(amt(bk.largest))}</Calc>
+      <h3>3. {t.bkSteps[2]}</h3>
+      <p>{t.bkOff(who(bk.blocker.group))}</p>
+      {bk.placed.map((b) => (
+        <Calc key={b.lpId}>{t.bkReserve(who(b.group), bk.pillar, amt(b.row.line), amt(b.row.reserved), amt(b.row.headroom))}</Calc>
+      ))}
+      <h3>4. {t.bkSteps[3]}</h3>
+      <p>{t.bkFill(who(bk.after.find((a) => a.filled)!.group))}</p>
+      {bk.after.map((a) => (
+        <Calc key={a.lpId}>{a.filled ? t.bkUsed(who(a.group), bk.pillar, amt(a.row.line), amt(a.row.used), amt(a.row.headroom)) : t.bkFreed(who(a.group), bk.pillar, amt(a.row.headroom))}</Calc>
+      ))}
+      <p>{t.bkEnd}</p>
 
       <details className="more">
         <summary>{t.more}</summary>

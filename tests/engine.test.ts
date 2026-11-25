@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import golden from '../src/data/golden.json';
 import { PILLARS, pillarEnds, pillarIndex, spotDate, tenorDate, tomDate } from '../src/engine/calendar';
 import { defaultState } from '../src/engine/defaults';
-import { board, channelFill, checkTrade } from '../src/engine/lines';
+import { board, checkTrade } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
 import { exposureOf, makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
 import { nextPillarStep, rollSummary } from '../src/engine/roll';
-import { buildFor, buildTrade, reducer } from '../src/engine/state';
+import { buildTrade, candidates, largestThatFits, reducer } from '../src/engine/state';
 import type { AppState, PairId, Tenor, Ticket, Trade } from '../src/engine/types';
 
 const FAR_TENORS = ['SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'] as const;
@@ -272,78 +272,98 @@ describe('check, reserve, fill', () => {
   });
 });
 
-describe('a channel that checks credit itself', () => {
-  // Bank B on EBS Market: the desk keeps USD 20m of 1M NDF available. The 1M add-on
-  // is 1%, so 200,000 is held on the O/N, 1W and 1M lines and nothing beyond.
-  const order = (amount: number): Ticket => ({ product: 'NDF', pair: 'USDTWD', side: 'BUY', amount, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' });
-  const rowsOf = (s: AppState) => board(makeCtx(s), s, 'B').psr;
-  const available = (s: AppState) => board(makeCtx(s), s, 'B').allocations[0].available;
-  const lineAt1M = (line: number) => reducer(defaultState(), { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = line) });
+describe('a channel that discloses the counterparty after the trade', () => {
+  // EBS Market: Banks B, D and E could fill an order. The desk cannot choose among
+  // them, so the order is checked against each and reserved on each.
+  const order = (over: Partial<Ticket> = {}): Ticket => ({ product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 20 * M, tenor: '1M', lpId: 'A-LDN-360T', book: 'EBSM', settlement: 'AUTO', ...over });
+  const at = (s: AppState, groupId: string, pillar: string) => board(makeCtx(s), s, groupId).psr.find((r) => r.key === pillar)!;
+  const statuses = (s: AppState) => s.trades.map((t) => [t.id, t.status]);
 
-  it('holds room for all the channel can fill before the desk hears of it', () => {
-    const psr = rowsOf(defaultState());
-    expect(psr.map((r) => r.allocated)).toEqual([200_000, 200_000, 200_000, 0, 0, 0]);
-    expect(psr[2]).toMatchObject({ used: 200_000, headroom: 3_800_000 });
+  it('reserves on every counterparty that could fill the order', () => {
+    const s = reducer(defaultState(), { type: 'SEND', ticket: order() });
+    expect(statuses(s)).toEqual([['H1-B', 'IN_FLIGHT'], ['H1-D', 'IN_FLIGHT'], ['H1-E', 'IN_FLIGHT']]);
+    expect(s.trades.every((t) => t.orderId === 'H1')).toBe(true);
+    // 20m x 1% = 200,000 on each of the three, and nothing on a group that is not on the channel.
+    for (const g of ['B', 'D', 'E']) expect(at(s, g, '1M').reserved).toBeCloseTo(200_000, 6);
+    expect(at(s, 'A', '1M').used).toBe(0);
   });
 
-  it('blocks a hedge on another channel that only the held room keeps out', () => {
-    // 1M line cut to 400,000. EUR 20m 1M swap: 23.3m x 1% = 233,000. With 200,000 held: 433,000.
-    let s = lineAt1M(400_000);
-    const swap = ticket({ lpId: 'B-360T', tenor: '1M' });
-    const check = checkTrade(makeCtx(s), s, deal(s, swap));
-    expect(check.psr[2].after).toBeCloseTo(433_000, 6);
-    expect(check.ok).toBe(false);
-    expect(check.blockedByAllocation).toBe(true);
+  it('a fill books one counterparty and releases the others', () => {
+    let s = reducer(defaultState(), { type: 'SEND', ticket: order() });
+    s = reducer(s, { type: 'FILL', id: 'H1-D' });
+    expect(statuses(s)).toEqual([['H1-B', 'UNFILLED'], ['H1-D', 'FILLED'], ['H1-E', 'UNFILLED']]);
+    expect(at(s, 'D', '1M')).toMatchObject({ today: 200_000, reserved: 0, used: 200_000 });
+    expect(at(s, 'B', '1M').used).toBe(0);
+    expect(at(s, 'E', '1M').used).toBe(0);
+  });
 
-    // Keep USD 10m on the channel instead: 100,000 held, 333,000 in all.
-    s = reducer(s, { type: 'SET_CHANNEL_BUFFER', channel: 'EBSM', groupId: 'B', keepUsd: 10 * M });
+  it('an order that finds no match releases every reservation', () => {
+    let s = reducer(defaultState(), { type: 'SEND', ticket: order() });
+    s = reducer(s, { type: 'REJECT', id: 'H1-B' });
+    expect(statuses(s)).toEqual([['H1-B', 'UNFILLED'], ['H1-D', 'UNFILLED'], ['H1-E', 'UNFILLED']]);
+    for (const g of ['B', 'D', 'E']) expect(at(s, g, '1M').used).toBe(0);
+  });
+
+  it('the tightest line caps the whole order, until that counterparty is switched off on the channel', () => {
+    // 6M add-on 3%: 20m uses 600,000. Bank E has a 6M line of 500,000; B and D have more.
+    const s0 = defaultState();
+    const sixMonths = order({ tenor: '6M' });
+    const checks = (candidates(makeCtx(s0), s0, sixMonths) as Trade[]).map((t) => [t.lpId, checkTrade(makeCtx(s0), s0, t).ok]);
+    expect(checks).toEqual([['B-EBSM', true], ['D-EBSM', true], ['E-EBSM', false]]);
+    expect(reducer(s0, { type: 'SEND', ticket: sixMonths })).toBe(s0);
+    // What E's line can take: 500,000 / 3% = 16,666,666, to the thousand below.
+    expect(largestThatFits(makeCtx(s0), s0, sixMonths)).toBe(16_666_000);
+
+    const s1 = reducer(s0, { type: 'SWITCH_ON_CHANNEL', lpId: 'E-EBSM', on: false });
+    expect(largestThatFits(makeCtx(s1), s1, sixMonths)).toBe(20 * M);
+    const s2 = reducer(s1, { type: 'SEND', ticket: sixMonths });
+    expect(statuses(s2)).toEqual([['H1-B', 'IN_FLIGHT'], ['H1-D', 'IN_FLIGHT']]);
+    expect(at(s2, 'E', '6M').used).toBe(0);
+    // Switched back on, it counts again.
+    const s3 = reducer(s1, { type: 'SWITCH_ON_CHANNEL', lpId: 'E-EBSM', on: true });
+    expect(reducer(s3, { type: 'SEND', ticket: sixMonths })).toBe(s3);
+  });
+
+  it('holds the room against a hedge sent to the same counterparty on another channel', () => {
+    // Bank E's 1M line is 1,500,000. An order of 50m rests on the book: 500,000 reserved.
+    // EUR 40m 1M swap with E on 360T: 46.6m x 1% = 466,000. Two are in flight: 1,432,000 in all.
+    const swap = ticket({ lpId: 'E-360T', tenor: '1M', amount: 40 * M });
+    let s = reducer(defaultState(), { type: 'SEND', ticket: order({ amount: 50 * M }) });
+    s = reducer(s, { type: 'SEND', ticket: swap });
+    s = reducer(s, { type: 'SEND', ticket: swap });
+    expect(at(s, 'E', '1M').reserved).toBeCloseTo(1_432_000, 6);
+    // A third would reach 1,898,000.
+    const third = checkTrade(makeCtx(s), s, deal(s, swap));
+    expect(third.ok).toBe(false);
+    expect(third.blockedByReservation).toBe(true);
+    // The order fills with Bank B: E's 500,000 is free again and the third fits, at 1,398,000.
+    s = reducer(s, { type: 'FILL', id: 'H1-B' });
     expect(checkTrade(makeCtx(s), s, deal(s, swap)).ok).toBe(true);
   });
 
-  it('books a fill as utilisation, then tops the channel up out of headroom', () => {
-    const s0 = defaultState();
-    const s = reducer(s0, { type: 'CHANNEL_FILL', ticket: order(20 * M) });
-    expect(s.trades.map((t) => [t.id, t.status, t.amount])).toEqual([['H1', 'FILLED', 20 * M]]);
-    // 20m x 1% = 200,000 now in use. The channel is topped up to 20m again: 200,000 held.
-    // The fill has come out of headroom: 3,800,000 before, 3,600,000 after.
-    expect(rowsOf(s)[2]).toMatchObject({ today: 200_000, allocated: 200_000, used: 400_000, headroom: 3_600_000 });
-    expect(available(s)).toBe(20 * M);
-    // The channel never fills more than is available there, whatever the order.
-    expect(channelFill(makeCtx(s0), s0, deal(s0, order(50 * M)))).toMatchObject({ available: 20 * M, fillUsd: 20 * M });
+  it('with the check switched off, nothing is reserved and a fill can take a line over', () => {
+    // 20m of 6M NDF uses 600,000; Bank E's 6M line is 500,000.
+    const s0 = reducer(defaultState(), { type: 'SWITCH_BOOK_CHECK', channel: 'EBSM', on: false });
+    const sixMonths = order({ tenor: '6M' });
+    expect(reducer(s0, { type: 'SEND', ticket: sixMonths })).toBe(s0); // no reservation to make
+    const s1 = reducer(s0, { type: 'BOOK_FILL', ticket: sixMonths, lpId: 'E-EBSM' });
+    expect(statuses(s1)).toEqual([['H1', 'FILLED']]);
+    expect(at(s1, 'E', '6M')).toMatchObject({ used: 600_000, headroom: -100_000 });
+    // Switched on, the desk does not book a fill it never reserved for.
+    const on = defaultState();
+    expect(reducer(on, { type: 'BOOK_FILL', ticket: sixMonths, lpId: 'E-EBSM' })).toBe(on);
   });
 
-  it('tops up less as the line fills, and at zero the channel stops', () => {
-    // 1M line 500,000: room for USD 50m of 1M NDF in all.
-    let s = lineAt1M(500_000);
-    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // 200,000 in use, 300,000 free
-    expect(available(s)).toBe(20 * M);
-    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // 400,000 in use, 100,000 free
-    expect(available(s)).toBe(10 * M); // 100,000 / 1%
-    expect(rowsOf(s)[2]).toMatchObject({ today: 400_000, allocated: 100_000, used: 500_000, headroom: 0 });
+  it('takes one product here, needs a counterparty switched on, and lapses overnight like any hedge', () => {
+    let s = defaultState();
+    expect(candidates(makeCtx(s), s, { ...ticket(), book: 'EBSM' })).toEqual({ error: 'BOOK_PRODUCT' });
+    // Naming an LP on the channel does not choose it: the order still goes to the book.
+    expect((candidates(makeCtx(s), s, order({ lpId: 'B-EBSM', book: undefined })) as Trade[]).map((t) => t.lpId)).toEqual(['B-EBSM', 'D-EBSM', 'E-EBSM']);
+    for (const lpId of ['B-EBSM', 'D-EBSM', 'E-EBSM']) s = reducer(s, { type: 'SWITCH_ON_CHANNEL', lpId, on: false });
+    expect(candidates(makeCtx(s), s, order())).toEqual({ error: 'BOOK_EMPTY' });
 
-    const last = channelFill(makeCtx(s), s, deal(s, order(20 * M)));
-    expect(last).toMatchObject({ fillUsd: 10 * M, availableAfter: 0 });
-    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // only 10m fills
-    expect(s.trades[2].amount).toBe(10 * M);
-    expect(rowsOf(s)[2]).toMatchObject({ today: 500_000, allocated: 0, used: 500_000 });
-    expect(available(s)).toBe(0);
-    expect(reducer(s, { type: 'CHANNEL_FILL', ticket: order(10 * M) })).toBe(s); // nothing left to fill
-    expect(rowsOf(s).every((r) => r.used <= r.line + 0.01)).toBe(true);
-  });
-
-  it('is not checked by the desk, and takes one kind of order', () => {
-    const s = defaultState();
-    expect(reducer(s, { type: 'SEND', ticket: order(20 * M) })).toBe(s); // nothing to send: the channel does not ask
-    expect(reducer(s, { type: 'CHANNEL_FILL', ticket: ticket({ lpId: 'B-360T' }) })).toBe(s);
-    expect(buildFor(makeCtx(s), s, ticket({ lpId: 'B-EBSM' }))).toEqual({ error: 'CHANNEL_ORDER' });
-    expect(buildFor(makeCtx(s), s, { ...order(20 * M), tenor: '3M' })).toEqual({ error: 'CHANNEL_ORDER' });
-  });
-
-  it('the next day yesterday\'s fill is still in use and the channel is kept topped up', () => {
-    let s = reducer(defaultState(), { type: 'CHANNEL_FILL', ticket: order(20 * M) });
-    s = reducer(s, { type: 'NEXT_DAY' });
-    const a = board(makeCtx(s), s, 'B').allocations[0];
-    expect([a.filled, a.available]).toEqual([0, 20 * M]);
-    expect(rowsOf(s)[2].earlier).toBeGreaterThan(199_000);
+    let open = reducer(defaultState(), { type: 'SEND', ticket: order() });
+    open = reducer(open, { type: 'NEXT_DAY' });
+    expect(open.trades.every((t) => t.status === 'EXPIRED')).toBe(true);
   });
 });

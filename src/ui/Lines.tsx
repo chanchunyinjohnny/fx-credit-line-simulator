@@ -13,7 +13,7 @@ const T = {
   en: {
     unit: 'USD mio',
     today: 'Today, by banking group',
-    todayNote: 'A group has one set of lines, shared by all its LPs and channels. Each cell is pre-settlement risk in use, with reservations and room held for channels, against the line for that pillar.',
+    todayNote: 'A group has one set of lines, shared by all its LPs and channels. Each cell is pre-settlement risk in use, reservations included, against the line for that pillar.',
     group: 'Banking group and its LPs',
     to: (d: string) => `to ${d}`,
     busiest: 'Settlement, busiest day',
@@ -29,7 +29,7 @@ const T = {
   zh: {
     unit: '百萬美元',
     today: '今日各銀行集團的額度',
-    todayNote: '每個集團只有一套額度，旗下所有 LP 和渠道共用。每格是該期限檔已佔用的交割前風險（包括預佔和場地切片）對比額度。',
+    todayNote: '每個集團只有一套額度，旗下所有 LP 和渠道共用。每格是該期限檔已用的交割前風險（包括預佔）對比額度。',
     group: '銀行集團及其 LP',
     to: (d: string) => `至 ${d}`,
     busiest: '結算風險，最高一日',
@@ -51,7 +51,7 @@ function Cell({ row, label, noLine, overBy }: { row: BoardRow; label: string; no
   return (
     <>
       {ok ? `${mio(row.used)} / ${mio(row.line)}` : <Status ok={false}>{overBy(mio(row.used - row.line))}</Status>}
-      <LineBar dense label={label} line={row.line} parts={[row.earlier + row.today, row.reserved, row.allocated]} total={row.used} ok={ok} />
+      <LineBar dense label={label} line={row.line} parts={[row.earlier + row.today, row.reserved]} total={row.used} ok={ok} />
     </>
   );
 }

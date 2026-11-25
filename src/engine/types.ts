@@ -8,7 +8,8 @@ export type Product = 'SWAP' | 'FORWARD' | 'NDF';
 export type Side = 'BUY' | 'SELL';
 /** CLS: payment-versus-payment. GROSS: each side pays separately. CASH: one net payment (NDF). */
 export type Settlement = 'CLS' | 'GROSS' | 'CASH';
-export type TradeStatus = 'IN_FLIGHT' | 'FILLED' | 'REJECTED' | 'EXPIRED';
+/** UNFILLED: the order was filled with another counterparty, or with none, and this reservation was released. */
+export type TradeStatus = 'IN_FLIGHT' | 'FILLED' | 'REJECTED' | 'UNFILLED' | 'EXPIRED';
 export type Channel = '360T' | 'FXGO' | 'EBSM';
 
 export interface PairInfo {
@@ -46,6 +47,8 @@ export interface Trade {
   tradeDate: ISODate;
   settlement: Settlement;
   status: TradeStatus;
+  /** Set when one order could fill with several counterparties: each of them carries a reservation for it. */
+  orderId?: string;
 }
 
 /** The banking group that holds the credit lines. */
@@ -66,21 +69,16 @@ export interface Lp {
   groupId: string;
 }
 
-/** What the desk keeps available with one group on a channel that checks credit
- *  itself: the most the channel can fill before the desk hears of it. The desk
- *  tops it up after each fill for as long as the group's lines have room. */
-export interface ChannelBuffer {
-  channel: Channel;
-  groupId: string;
-  keepUsd: number; // notional of the largest trade the channel may fill; the desk keeps this much available there
-}
-
 export interface AppState {
   businessDate: ISODate;
   market: MarketData;
   groups: Group[];
   lps: Lp[];
-  channelBuffers: ChannelBuffer[];
+  /** LPs switched off on a channel that discloses after the trade: the channel will not match the desk with them. */
+  channelOff: string[];
+  /** Channels that disclose after the trade where the desk has switched its own check off: orders there are
+   *  neither checked nor reserved, and a fill is booked when the channel reports it. */
+  bookCheckOff: Channel[];
   addOnPct: number[]; // percent of notional, one per time pillar
   /** Internal variant: a negative market value reduces the add-on. Off is the standard method. */
   offsetNegativeMv?: boolean;
@@ -94,6 +92,8 @@ export interface Ticket {
   side: Side;
   amount: number;
   tenor: Tenor;
-  lpId: string;
+  lpId: string; // the LP the hedge is sent to
+  /** Set when the order goes to a channel that discloses after the trade: the desk cannot choose the LP. */
+  book?: Channel;
   settlement: 'AUTO' | Settlement;
 }

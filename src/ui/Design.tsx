@@ -29,31 +29,33 @@ const T = {
     kindNames: { pre: 'Disclosed before the trade', post: 'Disclosed after the trade' },
     kindRows: [
       ['The desk learns the counterparty', 'Before the trade is final: when it sends, or when the channel asks', 'From the fill report'],
-      ['Who checks credit', 'The desk, trade by trade', 'The channel, against a limit the desk set in advance'],
-      ['How room is taken on the line', 'Reserved when this hedge passes the check', 'Held in advance for the channel'],
-      ['Channels', 'Request for quote and streams. An order book that asks before the trade is final', 'An order book that fills on its own limits'],
+      ['What the desk checks before the order goes out', 'That one counterparty', 'Every counterparty that could fill the order'],
+      ['How room is taken on the line', 'Reserved with that counterparty', 'Reserved with each of them; after the fill, kept only with the one that filled'],
+      ['Channels', 'Request for quote and streams. An order book that asks before the trade is final', 'An order book that names the counterparty afterwards'],
     ],
     kindsWhere: {
       send: 'Request for quote or stream: 360T, FXGO.',
       callback: 'An order book that names the counterparty and asks.',
       channel: 'An order book that names the counterparty afterwards: EBS Market.',
     },
-    legend: 'The shaded step is where the desk decides on the credit line.',
+    legend: 'The shaded step is where the desk decides on the credit line. It is the same check in all three.',
     canHead: 'Disclosed after the trade: what the desk can and cannot do',
     can: 'Can',
     canList: [
-      'Keep every counterparty within its line. The channel fills only within the limit, and the room is held before the limit is set.',
-      'Book each fill on the same line as every other hedge, netted the same way, as soon as the fill names the counterparty.',
-      'Stop filling with a counterparty. With no room left, its limit on the channel is zero.',
+      'Keep every counterparty within its line, without changing any limit held at the channel. The order is reserved on each counterparty that could fill it before it goes out.',
+      'Reserve what the order would really use: its own tenor and direction, netted like any other hedge.',
+      'Book the fill on the same line as every other hedge, and release the rest, as soon as the fill names the counterparty.',
     ],
     cannot: 'Cannot',
     cannotList: [
-      'Approve or refuse a single trade, or choose the counterparty.',
-      'Avoid idle room. Some is held for every counterparty on the channel, whether or not it trades.',
-      'Hold only what the trade will use. The desk cannot tell which of its orders will fill, and the channel limit is one amount for every tenor. So it holds for the worst case: the longest order it has there. The excess comes back when the fill is booked.',
-      'Work where limits on the channel cannot be changed during the day. That falls back to one fixed slice a day.',
+      'Choose the counterparty, or refuse a single trade.',
+      'Place an order larger than the tightest line allows. One counterparty short of room holds the whole order back, until it is switched off at the channel.',
+      'Leave the other lines free while an order is open. Each of them carries the reservation until the order is done.',
+      'Switch a counterparty off itself, unless the channel gives the desk that access. Today a person does it.',
     ],
-    ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + held for channels + headroom.',
+    switchText:
+      'Each such channel has a switch. On, the desk checks and reserves as above. Off, it relies on the limits held at the channel and books fills afterwards: a line can then be exceeded, and the desk learns of it after the trade.',
+    ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + headroom.',
     scope: 'Scope: FX swap, forward and NDF. A channel reached through a prime broker or clearing house faces that one counterparty, so it has one line of its own.',
     premise: 'The premise',
     premiseText:
@@ -70,7 +72,7 @@ const T = {
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
       'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
-      'The channel limit is the largest trade the desk allows there. Room held is that limit times the add-on of the longest order sent there, with no netting; the fill is netted when it is booked. The limit is topped up after each fill.',
+      'An order on a channel that discloses after the trade could fill with any counterparty switched on there, for its whole amount. It is reserved on each of them.',
     ],
   },
   zh: {
@@ -93,31 +95,32 @@ const T = {
     kindNames: { pre: '事前披露', post: '事後披露' },
     kindRows: [
       ['交易台何時知道對手', '成交前：送出時，或場地來問時', '成交後：從成交回報'],
-      ['誰檢查額度', '交易台，逐筆', '場地，按交易台預設的限額'],
-      ['額度怎樣佔用', '這一筆通過檢查時預佔', '事先為場地預留（場地切片）'],
-      ['渠道', '詢價和持續報價。成交前會來問的訂單簿', '自己按限額成交的訂單簿'],
+      ['送出前檢查誰', '這一個對手', '每個可能成交的對手'],
+      ['額度怎樣佔用', '在這個對手那裡預佔', '在每一個那裡預佔；成交後只留成交的那一個'],
+      ['渠道', '詢價和持續報價。成交前會來問的訂單簿', '成交後才披露對手的訂單簿'],
     ],
     kindsWhere: {
       send: '詢價和持續報價：360T、FXGO。',
       callback: '撮合後披露對手、並來問的訂單簿。',
       channel: '成交後才披露對手的訂單簿：EBS Market。',
     },
-    legend: '有底色的一步，是交易台決定額度夠不夠的地方。',
+    legend: '有底色的一步，是交易台決定額度夠不夠的地方。三個流程用的是同一個檢查。',
     canHead: '事後披露的渠道：做得到和做不到的',
     can: '做得到',
     canList: [
-      '每個對手都不會超額。場地只在限額之內成交，而額度是先預留、後設限額。',
-      '成交回報一披露對手，就記在同一條額度上，和其他對沖一樣計淨額。',
-      '停止和某個對手成交。額度沒有空間時，它在場地上的限額就是零。',
+      '每個對手都不會超額，而且不用改動場地上的限額。訂單掛出去之前，已經在每個可能成交的對手那裡預佔。',
+      '預佔得剛剛好：按這張訂單自己的期限和方向計，和其他對沖一樣計淨額。',
+      '成交回報一披露對手，就記在同一條額度上，其餘對手的預佔即時釋放。',
     ],
     cannot: '做不到',
     cannotList: [
-      '批准或拒絕個別成交，或者選擇對手。',
-      '避免額度閒置。場地上每個對手都要預留一份，不論有沒有成交。',
-      '預留得剛剛好。成交前不知道哪一張訂單會成交，而場地限額只有一個金額，不分期限。所以按最壞情況預留：掛在那裡期限最長的訂單。多留的在記帳後退回。',
-      '在場地不能即日改限額時運作。那就只能退回每日固定切一份。',
+      '選擇對手，或者拒絕個別成交。',
+      '掛出大過最緊那條額度容得下的單。一個對手額度不夠，整張單都要縮小，直到它在場地上被停用。',
+      '掛單期間不佔其他對手的額度。訂單未完結，每個可能成交的對手都留著這份預佔。',
+      '自己停用對手，除非場地給交易台這個權限。現時由人手做。',
     ],
-    ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 場地切片 + 可用額度。',
+    switchText: '每個這類場地有一個開關。開：照上面的做法，掛單前檢查並預佔。關：只靠場地上的限額，成交後才記帳；額度可能被超出，而且交易台事後才知道。',
+    ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 可用額度。',
     scope: '適用範圍：外匯掉期、遠期和 NDF。經主經紀商或清算所交易的渠道，對手只有那一家，另有一條自己的額度。',
     premise: '前提',
     premiseText: '交易台向授信管理部門要求每日一個固定額度，只計交易台自己的對沖。條件是交易台能管好自己的這一部分。這個設計就是為了做到這一點。',
@@ -133,7 +136,7 @@ const T = {
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
       'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',
-      '場地限額是交易台容許的最大一筆。場地切片 = 場地限額 × 送往該場地最長期限訂單的附加因子，按全額預留；成交後按淨額記帳。每次成交後補回限額。',
+      '掛到事後披露場地的訂單，可能和場地上任何一個開通的對手成交，而且是整張單。所以在每一個那裡都預佔。',
     ],
   },
 } as const;
@@ -238,6 +241,7 @@ export function Design() {
           </ul>
         </section>
       </div>
+      <p>{t.switchText}</p>
       <p className="quiet">{t.scope}</p>
 
       <h2>{t.premise}</h2>

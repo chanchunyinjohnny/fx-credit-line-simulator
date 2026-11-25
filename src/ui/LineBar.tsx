@@ -3,17 +3,17 @@ import { useLang } from './i18n';
 
 const T = {
   en: {
-    names: ['In use', 'Reserved', 'Held for a channel', 'This hedge'],
+    names: ['In use', 'Reserved', 'This hedge'],
     label: (k: string, a: string, l: string, over: boolean) => `${k}: ${a} of ${l} USD mio${over ? ', over the line' : ''}`,
   },
   zh: {
-    names: ['已用', '預佔', '場地切片', '本筆'],
+    names: ['已用', '預佔', '本筆'],
     label: (k: string, a: string, l: string, over: boolean) => `${k}：${a} / ${l} 百萬美元${over ? '，超出額度' : ''}`,
   },
 };
-const SEGMENTS = ['seg-used', 'seg-reserved', 'seg-allocated', 'seg-hedge'] as const;
+const SEGMENTS = ['seg-used', 'seg-reserved', 'seg-hedge'] as const;
 
-/** One credit line as a bar: filled hedges, reservations, room held for channels and, when given, the hedge on the ticket. */
+/** One credit line as a bar: filled hedges, reservations and, when given, the hedge on the ticket. */
 export function LineBar(p: { label: string; line: number; parts: number[]; total: number; ok: boolean; dense?: boolean }) {
   const t = T[useLang()];
   const parts = p.parts.map((v, i) => ({ v, cls: SEGMENTS[i], name: t.names[i] })).filter((x) => x.v > 0.5);
@@ -33,7 +33,7 @@ export function BarLegend({ withHedge }: { withHedge?: boolean }) {
   const t = T[useLang()];
   return (
     <ul className="legend">
-      {t.names.slice(0, withHedge ? 4 : 3).map((name, i) => (
+      {t.names.slice(0, withHedge ? 3 : 2).map((name, i) => (
         <li key={name}>
           <span className={`seg ${SEGMENTS[i]}`} /> {name}
         </li>

@@ -38,12 +38,10 @@ export function defaultState(): AppState {
       { id: 'E-FXGO', name: 'Bank E', channel: 'FXGO', groupId: 'E' },
       { id: 'B-EBSM', name: 'Bank B', channel: 'EBSM', groupId: 'B' },
       { id: 'D-EBSM', name: 'Bank D', channel: 'EBSM', groupId: 'D' },
+      { id: 'E-EBSM', name: 'Bank E', channel: 'EBSM', groupId: 'E' },
     ],
-    // USD 0.2m and 0.1m of room at the 1M add-on of 1%.
-    channelBuffers: [
-      { channel: 'EBSM', groupId: 'B', keepUsd: 20 * M },
-      { channel: 'EBSM', groupId: 'D', keepUsd: 10 * M },
-    ],
+    channelOff: [],
+    bookCheckOff: [],
     addOnPct: [0.2, 0.5, 1.0, 2.0, 3.0, 4.5],
     offsetNegativeMv: false,
     trades: [],

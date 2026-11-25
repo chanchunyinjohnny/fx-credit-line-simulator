@@ -1,19 +1,24 @@
-import type { Channel, PairId, Product, Tenor } from './types';
+import type { AppState, Channel, Lp, Product } from './types';
 
-/** Who checks credit before a trade on a channel is final.
- *  OMS: the desk knows the counterparty and checks its own credit line first.
- *  CHANNEL: the channel matches against a limit it holds and does not ask; the
- *  desk learns the counterparty from the fill. */
+/** When the desk learns the counterparty on a channel.
+ *  BEFORE: before the trade is final, so each hedge is checked against that one LP.
+ *  AFTER: from the fill. The desk cannot choose the counterparty, so an order is
+ *  checked against every counterparty that could fill it. */
 export interface ChannelInfo {
   label: string;
-  checkedBy: 'OMS' | 'CHANNEL';
-  /** The one order the desk sends to a channel that checks credit itself. Room
-   *  held for the channel is sized on this order's add-on. */
-  only?: { product: Product; pair: PairId; tenor: Tenor };
+  disclosed: 'BEFORE' | 'AFTER';
+  /** The one product this app sends to the channel. */
+  only?: Product;
 }
 
 export const CHANNELS: Record<Channel, ChannelInfo> = {
-  '360T': { label: '360T', checkedBy: 'OMS' },
-  FXGO: { label: 'FXGO', checkedBy: 'OMS' },
-  EBSM: { label: 'EBS Market', checkedBy: 'CHANNEL', only: { product: 'NDF', pair: 'USDTWD', tenor: '1M' } },
+  '360T': { label: '360T', disclosed: 'BEFORE' },
+  FXGO: { label: 'FXGO', disclosed: 'BEFORE' },
+  EBSM: { label: 'EBS Market', disclosed: 'AFTER', only: 'NDF' },
 };
+
+/** Whether the desk checks and reserves before it places an order on this channel's book. */
+export const checksBook = (s: AppState, channel: Channel) => !s.bookCheckOff.includes(channel);
+
+/** The counterparties an order on this channel could fill with: those still switched on there. */
+export const openOn = (s: AppState, channel: Channel): Lp[] => s.lps.filter((l) => l.channel === channel && !s.channelOff.includes(l.id));

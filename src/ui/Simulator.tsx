@@ -1,10 +1,10 @@
 import { useMemo, useState, type Dispatch } from 'react';
 import { OUTRIGHT_TENORS, PAIRS, PAIR_IDS, PILLARS, SWAP_TENORS } from '../engine/calendar';
-import { CHANNELS } from '../engine/channels';
-import { board, channelFill, checkTrade, groupOf, type BoardRow, type ChannelFill, type CheckResult, type CheckRow } from '../engine/lines';
+import { CHANNELS, checksBook } from '../engine/channels';
+import { board, checkTrade, groupOf, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
 import { makeCtx, valueTrade, type Ctx } from '../engine/risk';
-import { buildFor, buildTrade, channelOf, type Action, type TicketError } from '../engine/state';
-import type { AppState, Group, Lp, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
+import { bookOf, buildTrade, candidates, largestThatFits, type Action, type TicketError } from '../engine/state';
+import type { AppState, Channel, Group, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
 import { NumInput, Status } from './bits';
 import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, partyName, rate, shortDay, signedMio } from './format';
 import { useLang, type Lang } from './i18n';
@@ -26,9 +26,9 @@ const T = {
     settlement: 'Settlement',
     standard: (s: string) => `Standard${s ? `: ${s}` : ''}`,
     sendTo: 'Send to',
-    matchedOn: 'Or matched on',
+    orBook: 'Or place on',
     lpGroup: 'Liquidity provider. A tick means it has room for this hedge.',
-    channelGroup: 'Counterparty on a channel that discloses after the trade. A tick means its limit covers this order.',
+    bookGroup: 'A channel that names the counterparty after the trade. A tick means every counterparty there has room for this order.',
     hasRoom: ', has room',
     noRoom: ', no room',
     fits: 'Fits',
@@ -38,16 +38,18 @@ const T = {
     psrOver: (k: string, a: string, l: string) => `Pre-settlement risk at ${k} would reach ${a} against a line of ${l}.`,
     srOver: (d: string, a: string, l: string) => `Settlement risk on ${d} would reach ${a} against a line of ${l}.`,
     onlyReservation: ' It would fit without the hedge in flight: the reservation is what stops both from filling.',
-    onlyAllocation: ' It would fit without the room held for a channel. Lower that channel limit to free it.',
-    chFull: 'The channel fills it',
-    chPart: (x: string) => `The channel fills only USD ${x} mio`,
-    chNone: 'The channel does not fill it',
-    chWhy: (ch: string, g: string, left: string) => `${ch} checks credit at the match and does not ask the desk. It can fill up to USD ${left} mio with ${g} now.`,
-    chBooks: (x: string) => ` The fill is booked as USD ${x} mio in use.`,
-    chTopUp: ' The desk then holds room again and tops the channel up.',
-    chTopUpPart: (x: string) => ` The line has room to top the channel up to USD ${x} mio only.`,
-    chTopUpNone: ' The line then has no room left, so the channel is not topped up and stops filling.',
-    chFill: 'Channel fills',
+    bookFits: 'Every counterparty has room',
+    bookBlocked: (g: string) => `No room with ${g}`,
+    bookWhy: (ch: string, n: number) =>
+      `${ch} names the counterparty only after the trade, and the desk cannot choose it. The order could fill with any of ${n} counterparties, so it is checked against each and reserved on each.`,
+    bookCap: (ccy: string, x: string, g: string) => ` The largest order all of them have room for is ${ccy} ${x} mio. Or switch ${g} off on the channel, under the settings below.`,
+    bookCapNone: (g: string) => ` No size fits while ${g} is switched on at the channel.`,
+    bookOff: (ch: string) => `The check is switched off for ${ch}. The desk neither checks nor reserves: the channel fills on its own limits, and the desk books the fill afterwards.`,
+    bookOffOver: (g: string) => ` A fill with ${g} would take a line over.`,
+    place: 'Place and reserve',
+    fillsWith: (g: string) => `Fills with ${g}`,
+    eachTightest: 'Each counterparty that could fill it, at its tightest line',
+    workingsFor: (g: string) => `Workings: how each number is calculated, for ${g}`,
     at: (dates: string, rates: string) => `${dates} at ${rates}`,
     send: 'Send and reserve',
     psr: 'Pre-settlement risk',
@@ -60,15 +62,16 @@ const T = {
     viaCash: 'An NDF pays one net amount.',
     workings: 'Workings: how each number is calculated',
     figures: (g: string) => `Figures: where ${g}'s lines stand today`,
-    figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'Held for a channel', 'This hedge', 'Headroom after'],
+    figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'This hedge', 'Headroom after'],
     psrRow: (k: string) => `PSR ${k}`,
     srRow: (k: string) => `SR ${k}`,
     sent: 'Sent hedges',
     sentHead: ['Hedge', 'Status', 'Exposure, USD'],
-    status: { IN_FLIGHT: 'In flight', FILLED: 'Filled', REJECTED: 'Rejected', EXPIRED: 'Lapsed', SETTLED: 'Settled' },
+    status: { IN_FLIGHT: 'In flight', FILLED: 'Filled', REJECTED: 'Rejected', UNFILLED: 'Not filled', EXPIRED: 'Lapsed', SETTLED: 'Settled' },
     mio: 'mio',
     fill: 'Fill',
     reject: 'Reject',
+    noMatch: 'No match',
     workingsBtn: 'Workings',
     valued: (id: string) => `${id}, valued today`,
     market: 'Market data: change a rate and open hedges are revalued',
@@ -83,12 +86,11 @@ const T = {
     payNet: 'Payment netting',
     addOn: 'Add-on, %',
     offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
-    limits: 'Room held for a channel that discloses after the trade',
-    limitsHint:
-      'The largest trade the channel may fill with a group without asking the desk. The desk holds room for that trade on the credit line first, then sets the limit on the channel. After each fill it holds room again and sets the limit back. As the line fills the limit shrinks, and at zero the channel stops filling with that group.',
-    limitsHead: ['Channel and group', 'Largest trade', 'Channel limit now', 'Filled today', 'Held on the credit line'],
-    limitFor: (ch: string, g: string) => `Largest trade on ${ch} with ${g}`,
-    heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}, on ${pillar} and shorter`,
+    books: 'Channels that name the counterparty after the trade',
+    booksHint:
+      'An order there is checked against every counterparty switched on at the channel, and reserved on each. Switching a counterparty off is the channel’s own setting, kept by whoever administers credit there. With the check off, the desk relies on the channel’s limits alone and books fills afterwards.',
+    bookCheck: 'Check and reserve on every counterparty before placing an order',
+    bookParties: 'Switched on at the channel',
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
       NDF_ONLY: (p: string) => `${p} trades as an NDF only.`,
@@ -97,7 +99,8 @@ const T = {
       TOO_LARGE: () => 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.',
       NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
-      CHANNEL_ORDER: () => 'This channel takes one order here: USD/TWD NDF, 1M.',
+      BOOK_PRODUCT: () => 'This channel takes NDFs only here.',
+      BOOK_EMPTY: () => 'No counterparty is switched on at this channel.',
     } as Record<TicketError, (pair: string) => string>,
   },
   zh: {
@@ -109,9 +112,9 @@ const T = {
     settlement: '結算方式',
     standard: (s: string) => `預設${s ? `：${s}` : ''}`,
     sendTo: '送往',
-    matchedOn: '或在場地撮合',
+    orBook: '或掛到場地',
     lpGroup: 'LP。打勾代表有足夠額度做這筆對沖。',
-    channelGroup: '事後披露的場地上的對手。打勾代表場地限額足夠成交整張訂單。',
+    bookGroup: '成交後才披露對手的場地。打勾代表場地上每個對手都有足夠額度。',
     hasRoom: '，額度足夠',
     noRoom: '，額度不足',
     fits: '額度足夠',
@@ -120,16 +123,17 @@ const T = {
     psrOver: (k: string, a: string, l: string) => `${k} 期限檔的交割前風險將達 ${a}，額度只有 ${l}。`,
     srOver: (d: string, a: string, l: string) => `${d} 的結算風險將達 ${a}，額度只有 ${l}。`,
     onlyReservation: '若沒有在途的那一筆，這筆本來放得進：正是預佔擋住了兩筆同時成交。',
-    onlyAllocation: '若沒有場地切片，這筆本來放得進。調低場地限額就能騰出額度。',
-    chFull: '場地會成交',
-    chPart: (x: string) => `場地只成交 ${x} 百萬美元`,
-    chNone: '場地不會成交',
-    chWhy: (ch: string, g: string, left: string) => `${ch} 在撮合時自己檢查額度，不會問交易台。它現在最多可以和 ${g}成交 ${left} 百萬美元。`,
-    chBooks: (x: string) => `成交後 ${x} 百萬美元記入已用。`,
-    chTopUp: '交易台隨即再預留額度，補回場地切片。',
-    chTopUpPart: (x: string) => `額度只夠把場地切片補回到 ${x} 百萬美元。`,
-    chTopUpNone: '之後額度沒有空間，不再補回，場地不會再成交。',
-    chFill: '場地成交',
+    bookFits: '每個對手都放得下',
+    bookBlocked: (g: string) => `${g}的額度不夠`,
+    bookWhy: (ch: string, n: number) => `${ch} 成交後才披露對手，交易台不能選對手。這張單可能和 ${n} 個對手之中任何一個成交，所以每一個都要檢查並預佔。`,
+    bookCap: (ccy: string, x: string, g: string) => `每個對手都放得下的最大金額是 ${ccy} ${x} 百萬。或者在下方設定裡，在場地上停用 ${g}。`,
+    bookCapNone: (g: string) => `只要 ${g}在場地上還開通，任何金額都放不下。`,
+    bookOff: (ch: string) => `${ch} 的檢查已關掉。交易台不檢查、不預佔：場地按它自己的限額成交，成交後才記帳。`,
+    bookOffOver: (g: string) => `和 ${g}成交會超出額度。`,
+    place: '掛單並預佔額度',
+    fillsWith: (g: string) => `${g}成交`,
+    eachTightest: '每個可能成交的對手，各看最緊的一條額度',
+    workingsFor: (g: string) => `計算過程：每個數字怎樣算出來（以 ${g}為例）`,
     at: (dates: string, rates: string) => `${dates}，匯率 ${rates}`,
     send: '送出並預佔額度',
     psr: '交割前風險',
@@ -142,15 +146,16 @@ const T = {
     viaCash: 'NDF 只支付一筆差額。',
     workings: '計算過程：每個數字怎樣算出來',
     figures: (g: string) => `數字明細：${g}今日的額度使用情況`,
-    figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '場地切片', '本筆', '交易後可用額度'],
+    figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '本筆', '交易後可用額度'],
     psrRow: (k: string) => `交割前 ${k}`,
     srRow: (k: string) => `結算 ${k}`,
     sent: '已送出的對沖',
     sentHead: ['對沖', '狀態', '風險敞口（美元）'],
-    status: { IN_FLIGHT: '在途', FILLED: '已成交', REJECTED: '已拒絕', EXPIRED: '已失效', SETTLED: '已交收' },
+    status: { IN_FLIGHT: '在途', FILLED: '已成交', REJECTED: '已拒絕', UNFILLED: '沒有成交', EXPIRED: '已失效', SETTLED: '已交收' },
     mio: '百萬',
     fill: '成交',
     reject: '拒絕',
+    noMatch: '沒有成交',
     workingsBtn: '計算過程',
     valued: (id: string) => `${id}，按今日市場重估`,
     market: '市場數據：改動匯率，未到期的對沖即時重估',
@@ -165,11 +170,10 @@ const T = {
     payNet: '支付淨額結算',
     addOn: '附加因子 %',
     offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
-    limits: '場地切片：為事後披露的場地預留的額度',
-    limitsHint: '最大一筆：場地不用問交易台，一筆最多可以和一個集團成交多少。交易台先在授信額度上預留這一筆要用的額度，再設場地限額。每次成交後再預留，把限額設回來。額度越滿，限額越小；到零時，場地不再和這個集團成交。',
-    limitsHead: ['場地和集團', '最大一筆', '現在的場地限額', '今日已成交', '授信額度上預留'],
-    limitFor: (ch: string, g: string) => `${ch} 對 ${g}的最大一筆`,
-    heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}，佔 ${pillar} 及更短的期限檔`,
+    books: '事後披露的場地',
+    booksHint: '掛到這類場地的訂單，會對場地上每個開通的對手檢查並預佔。停用對手是場地自己的設定，由管理場地額度的人維護。關掉檢查的話，交易台只靠場地的限額，成交後才記帳。',
+    bookCheck: '掛單前對每個對手檢查並預佔',
+    bookParties: '在場地上開通的對手',
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,
       NDF_ONLY: (p: string) => `${p} 只能做 NDF。`,
@@ -178,7 +182,8 @@ const T = {
       TOO_LARGE: () => '本流程只涵蓋單一 LP、5,000 萬美元以內的對沖。較大的單請分成幾筆輸入。',
       NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
-      CHANNEL_ORDER: () => '這個場地在本程式只接受一種訂單：USD/TWD NDF，1M。',
+      BOOK_PRODUCT: () => '這個場地在本程式只做 NDF。',
+      BOOK_EMPTY: () => '這個場地上沒有開通的對手。',
     } as Record<TicketError, (pair: string) => string>,
   },
 };
@@ -194,6 +199,8 @@ const lpLabel = (s: AppState, lpId: string, lang: Lang) => {
   return `${partyName(lp.name, lang)} · ${CHANNELS[lp.channel].label}`;
 };
 
+const BOOKS = (Object.keys(CHANNELS) as Channel[]).filter((c) => CHANNELS[c].disclosed === 'AFTER');
+
 /** One credit line as the screen shows it: what is in use, what this hedge adds, what is left. */
 interface LineRow {
   key: string;
@@ -202,10 +209,14 @@ interface LineRow {
   board?: BoardRow; // absent for a date only this hedge touches
   used: number; // filled hedges
   reserved: number; // hedges in flight
-  allocated: number; // held for channels, once this ticket is counted
   hedge: number; // this ticket
   after: number;
   ok: boolean;
+}
+
+interface GroupRows {
+  psr: LineRow[];
+  sr: LineRow[];
 }
 
 function lineRows(keys: string[], label: (k: string) => string, line: (i: number) => number, b: BoardRow[], c?: CheckRow[]): LineRow[] {
@@ -221,8 +232,7 @@ function lineRows(keys: string[], label: (k: string) => string, line: (i: number
       board: br,
       used: (br?.earlier ?? 0) + (br?.today ?? 0),
       reserved: br?.reserved ?? 0,
-      allocated: cr ? cr.held : (br?.allocated ?? 0),
-      hedge: cr ? cr.hedge : 0,
+      hedge: cr ? cr.after - cr.before : 0,
       after,
       ok: cr ? cr.ok : after <= line(i) + 0.5,
     };
@@ -236,44 +246,38 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
   const [ticket, setTicket] = useState(DEFAULT_TICKET);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const built = buildFor(ctx, state, ticket);
-  const order = 'error' in built ? null : built;
-  // A channel that checks credit itself fills against its own limit; every other hedge is checked here first.
-  const byChannel = channelOf(state, ticket.lpId).checkedBy === 'CHANNEL';
-  const fill = order && byChannel ? channelFill(ctx, state, order) : null;
-  const check = order && !byChannel ? checkTrade(ctx, state, order) : null;
-  const trade = fill ? fill.trade : order;
+  const trades = candidates(ctx, state, ticket);
+  // On a book the desk cannot choose the counterparty: the order is checked against everyone who could fill it.
+  const book = bookOf(state, ticket);
+  const checks = 'error' in trades ? [] : trades.map((x) => checkTrade(ctx, state, x));
+  const fits = (to: Partial<Ticket>) => {
+    const other = candidates(ctx, state, { ...ticket, ...to });
+    return 'error' in other ? null : other.every((x) => checkTrade(ctx, state, x).ok);
+  };
+  const chip = (key: string, label: string, pressed: boolean, ok: boolean | null, onClick: () => void) => (
+    <button key={key} type="button" className="chip" aria-pressed={pressed} onClick={onClick}>
+      {ok !== null && (
+        <span className={ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
+          {ok ? '✓' : '✕'}
+        </span>
+      )}
+      {label}
+      <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
+    </button>
+  );
+  const rowsFor = (group: Group, c?: CheckResult): GroupRows => {
+    const b = board(ctx, state, group.id);
+    const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(c?.sr.map((r) => r.key) ?? [])])].sort();
+    return {
+      psr: lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, c?.psr),
+      sr: lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, c?.sr),
+    };
+  };
+
+  const check = checks[0];
   const group = groupOf(state, ticket.lpId);
   const groupName = partyName(group.name, lang);
-  const b = board(ctx, state, group.id);
-  const fits = (lp: Lp) => {
-    const other = buildFor(ctx, state, { ...ticket, lpId: lp.id });
-    if ('error' in other) return null;
-    if (CHANNELS[lp.channel].checkedBy === 'OMS') return checkTrade(ctx, state, other).ok;
-    const f = channelFill(ctx, state, other);
-    return f.fillUsd >= f.sizeUsd - 0.5;
-  };
-  const chips = (lps: Lp[]) =>
-    lps.map((lp) => {
-      const ok = fits(lp);
-      return (
-        <button key={lp.id} type="button" className="chip" aria-pressed={lp.id === ticket.lpId} onClick={() => setTicket({ ...ticket, lpId: lp.id })}>
-          {ok !== null && (
-            <span className={ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
-              {ok ? '✓' : '✕'}
-            </span>
-          )}
-          {lpLabel(state, lp.id, lang)}
-          <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
-        </button>
-      );
-    });
-  const checkedHere = (lp: Lp) => CHANNELS[lp.channel].checkedBy === 'OMS';
-
-  const result = fill ?? check;
-  const psr = lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, result?.psr);
-  const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(result?.sr.map((r) => r.key) ?? [])])].sort();
-  const sr = lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, result?.sr);
+  const { psr, sr } = rowsFor(group, book ? undefined : check);
 
   return (
     <>
@@ -282,50 +286,70 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
         <div className="lp-row">
           <span className="label">{t.sendTo}</span>
           <div className="chips" role="group" aria-label={t.lpGroup}>
-            {chips(state.lps.filter(checkedHere))}
+            {state.lps
+              .filter((lp) => CHANNELS[lp.channel].disclosed === 'BEFORE')
+              .map((lp) =>
+                chip(lp.id, lpLabel(state, lp.id, lang), !book && lp.id === ticket.lpId, fits({ lpId: lp.id, book: undefined }), () => setTicket({ ...ticket, lpId: lp.id, book: undefined })),
+              )}
           </div>
         </div>
         <div className="lp-row">
-          <span className="label">{t.matchedOn}</span>
-          <div className="chips" role="group" aria-label={t.channelGroup}>
-            {chips(state.lps.filter((lp) => !checkedHere(lp)))}
+          <span className="label">{t.orBook}</span>
+          <div className="chips" role="group" aria-label={t.bookGroup}>
+            {BOOKS.map((c) => {
+              // Choosing the book also sets the one product this app sends there.
+              const to = withProduct({ ...ticket, book: c }, CHANNELS[c].only ?? ticket.product);
+              return chip(c, CHANNELS[c].label, book === c, fits(to), () => setTicket(to));
+            })}
           </div>
         </div>
       </section>
 
       <section className="card">
-        {'error' in built ? (
-          <p className="alert" role="alert">
-            {t.errors[built.error](PAIRS[ticket.pair].label)}
-          </p>
-        ) : fill ? (
-          <ChannelVerdict order={order!} fill={fill} channel={channelOf(state, ticket.lpId).label} onFill={() => dispatch({ type: 'CHANNEL_FILL', ticket })} />
+        {book ? (
+          <BookPanel
+            ctx={ctx}
+            state={state}
+            ticket={ticket}
+            book={book}
+            error={'error' in trades ? trades.error : null}
+            views={checks.map((c) => ({ check: c, ...rowsFor(c.group, c) }))}
+            dispatch={dispatch}
+          />
         ) : (
-          <Verdict trade={order!} check={check!} onSend={() => dispatch({ type: 'SEND', ticket })} />
-        )}
+          <>
+            {'error' in trades ? (
+              <p className="alert" role="alert">
+                {t.errors[trades.error](PAIRS[ticket.pair].label)}
+              </p>
+            ) : (
+              <Verdict trade={check.trade} check={check} onSend={() => dispatch({ type: 'SEND', ticket })} />
+            )}
 
-        <LineBars title={t.psr} group={groupName} rows={psr} legend />
-        {sr.length > 0 ? (
-          <LineBars title={t.sr} group={groupName} rows={sr} />
-        ) : (
-          <p className="quiet">
-            <strong>{t.sr}</strong>
-            {lang === 'zh' ? '：' : ': '}
-            {t.srNone(groupName)} {trade?.settlement === 'CLS' && t.viaCls}
-            {trade?.settlement === 'CASH' && t.viaCash}
-          </p>
-        )}
+            <LineBars title={t.psr} group={groupName} rows={psr} legend />
+            {sr.length > 0 ? (
+              <LineBars title={t.sr} group={groupName} rows={sr} />
+            ) : (
+              <p className="quiet">
+                <strong>{t.sr}</strong>
+                {lang === 'zh' ? '：' : ': '}
+                {t.srNone(groupName)} {check?.trade.settlement === 'CLS' && t.viaCls}
+                {check?.trade.settlement === 'CASH' && t.viaCash}
+              </p>
+            )}
 
-        {result && trade && (
-          <details className="more">
-            <summary>{t.workings}</summary>
-            <Workings ctx={ctx} trade={trade} risk={result.risk!} measured={result.after} group={group} isNew held={psr.map((r) => r.allocated)} />
-          </details>
+            {check && (
+              <details className="more">
+                <summary>{t.workings}</summary>
+                <Workings ctx={ctx} trade={check.trade} risk={check.risk} measured={check.after} group={group} isNew />
+              </details>
+            )}
+            <details className="more">
+              <summary>{t.figures(groupName)}</summary>
+              <FiguresTable psr={psr} sr={sr} />
+            </details>
+          </>
         )}
-        <details className="more">
-          <summary>{t.figures(groupName)}</summary>
-          <FiguresTable psr={psr} sr={sr} />
-        </details>
       </section>
 
       <SentHedges ctx={ctx} state={state} dispatch={dispatch} openId={openId} onOpen={setOpenId} />
@@ -333,7 +357,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
       <section className="settings">
         <MarketEditor state={state} dispatch={dispatch} />
         <LinesEditor state={state} dispatch={dispatch} />
-        <ChannelLimitsEditor ctx={ctx} state={state} dispatch={dispatch} />
+        <BookEditor state={state} dispatch={dispatch} />
       </section>
     </>
   );
@@ -429,7 +453,6 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
         <p className="verdict-why">
           {why}
           {check.blockedByReservation && t.onlyReservation}
-          {check.blockedByAllocation && !check.blockedByReservation && t.onlyAllocation}
         </p>
         <p className="quiet">{t.at(dates, rates)}</p>
       </div>
@@ -440,37 +463,93 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
   );
 }
 
-/** An order on a channel that checks credit itself: the channel decides, the desk books the fill. */
-function ChannelVerdict({ order, fill, channel, onFill }: { order: Trade; fill: ChannelFill; channel: string; onFill: () => void }) {
+/** Of one counterparty's lines, the one this order presses hardest: the worst breach, or else the least room left. */
+function tightest(rows: LineRow[], name: string): LineRow {
+  const over = rows.filter((r) => !r.ok).sort((a, b) => b.after - b.line - (a.after - a.line))[0];
+  const touched = rows.filter((r) => Math.abs(r.hedge) > 0.5).sort((a, b) => a.line - a.after - (b.line - b.after))[0];
+  const r = over ?? touched ?? rows[0];
+  return { ...r, key: name, label: `${name} · ${r.label}` };
+}
+
+/** An order on a book that names the counterparty after the trade: one check and one reservation for
+ *  every counterparty that could fill it. With the check switched off, the channel alone decides. */
+function BookPanel(p: {
+  ctx: Ctx;
+  state: AppState;
+  ticket: Ticket;
+  book: Channel;
+  error: TicketError | null;
+  views: ({ check: CheckResult } & GroupRows)[];
+  dispatch: Dispatch<Action>;
+}) {
   const lang = useLang();
   const t = T[lang];
-  const g = partyName(fill.group.name, lang);
-  const full = fill.fillUsd >= fill.sizeUsd - 0.5;
+  const { ctx, state, ticket, views } = p;
+  if (p.error) {
+    return (
+      <p className="alert" role="alert">
+        {t.errors[p.error](PAIRS[ticket.pair].label)}
+      </p>
+    );
+  }
+  const channel = CHANNELS[p.book].label;
+  const checking = checksBook(state, p.book);
+  const name = (c: CheckResult) => partyName(c.group.name, lang);
+  const short = views.filter((v) => !v.check.ok).map((v) => name(v.check)).join(lang === 'zh' ? '、' : ', ');
+  const ok = short === '';
+  const largest = ok || !checking ? 0 : largestThatFits(ctx, state, ticket);
+  const order = views[0].check.trade;
+  const focus = views.find((v) => !v.check.ok) ?? views[0];
   return (
-    <div className="verdict-row">
-      <div>
-        <p className="verdict">
-          <Status ok={full}>{full ? t.chFull : fill.trade ? t.chPart(mio(fill.fillUsd)) : t.chNone}</Status>
-        </p>
-        <p className="verdict-why">
-          {t.chWhy(channel, g, mio(fill.available))}
-          {fill.risk && t.chBooks(mio(fill.risk.exposure))}
-          {fill.risk && (fill.availableAfter >= fill.keepUsd - 0.5 ? t.chTopUp : fill.availableAfter > 0.5 ? t.chTopUpPart(mio(fill.availableAfter)) : t.chTopUpNone)}
-        </p>
-        <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
+    <>
+      <div className="verdict-row">
+        <div>
+          <p className="verdict">
+            <Status ok={ok}>{ok ? t.bookFits : t.bookBlocked(short)}</Status>
+          </p>
+          <p className="verdict-why">
+            {checking ? t.bookWhy(channel, views.length) : t.bookOff(channel)}
+            {!ok && checking && (largest > 0 ? t.bookCap(PAIRS[ticket.pair].base, mio(largest), short) : t.bookCapNone(short))}
+            {!ok && !checking && t.bookOffOver(short)}
+          </p>
+          <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
+        </div>
+        {checking ? (
+          <button type="button" className="primary" disabled={!ok} onClick={() => p.dispatch({ type: 'SEND', ticket })}>
+            {t.place}
+          </button>
+        ) : (
+          <div className="verdict-actions">
+            {views.map((v) => (
+              <button key={v.check.trade.lpId} type="button" className="secondary" onClick={() => p.dispatch({ type: 'BOOK_FILL', ticket, lpId: v.check.trade.lpId })}>
+                {t.fillsWith(name(v.check))}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <button type="button" className="primary" disabled={!fill.trade} onClick={onFill}>
-        {t.chFill}
-      </button>
-    </div>
+
+      <LineBars title={t.eachTightest} group={channel} rows={views.map((v) => tightest([...v.psr, ...v.sr], name(v.check)))} legend wide />
+
+      <details className="more">
+        <summary>{t.workingsFor(name(focus.check))}</summary>
+        <Workings ctx={ctx} trade={focus.check.trade} risk={focus.check.risk} measured={focus.check.after} group={focus.check.group} isNew />
+      </details>
+      {views.map((v) => (
+        <details key={v.check.group.id} className="more">
+          <summary>{t.figures(name(v.check))}</summary>
+          <FiguresTable psr={v.psr} sr={v.sr} />
+        </details>
+      ))}
+    </>
   );
 }
 
 // ------------------------------------------------------------ credit lines
-function LineBars({ title, group, rows, legend }: { title: string; group: string; rows: LineRow[]; legend?: boolean }) {
+function LineBars({ title, group, rows, legend, wide }: { title: string; group: string; rows: LineRow[]; legend?: boolean; wide?: boolean }) {
   const t = T[useLang()];
   return (
-    <div className="lines">
+    <div className={wide ? 'lines lines-wide' : 'lines'}>
       <div className="lines-head">
         <h2>
           {title}{' '}
@@ -483,7 +562,7 @@ function LineBars({ title, group, rows, legend }: { title: string; group: string
       {rows.map((r) => (
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>
           <span className="line-label">{r.label}</span>
-          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.allocated, r.hedge]} total={r.after} ok={r.ok} />
+          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.hedge]} total={r.after} ok={r.ok} />
           <span className="line-figure">{r.ok ? t.of(mio(r.after), mio(r.line)) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</span>
         </div>
       ))}
@@ -512,7 +591,6 @@ function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
               <td>{mio(r.board?.initial ?? r.line)}</td>
               <td>{signedMio(r.board?.today ?? 0)}</td>
               <td>{signedMio(r.reserved)}</td>
-              <td>{mio(r.allocated)}</td>
               <td>{signedMio(r.hedge)}</td>
               <td>{r.after <= r.line + 0.5 ? mio(r.line - r.after) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</td>
             </tr>
@@ -566,7 +644,7 @@ function SentHedges(p: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action>; 
                             {t.fill}
                           </button>
                           <button type="button" onClick={() => p.dispatch({ type: 'REJECT', id: x.id })}>
-                            {t.reject}
+                            {x.orderId ? t.noMatch : t.reject}
                           </button>
                         </>
                       )}
@@ -591,12 +669,12 @@ function SentHedges(p: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action>; 
 function ExistingWorkings({ ctx, state, trade }: { ctx: Ctx; state: AppState; trade: Trade }) {
   const t = T[useLang()];
   const group = groupOf(state, trade.lpId);
-  const { measured, psr } = board(ctx, state, group.id);
+  const { measured } = board(ctx, state, group.id);
   const risk = measured.risks.find((r) => r.trade.id === trade.id) ?? valueTrade(ctx, trade);
   return (
     <div className="detail">
       <p className="quiet">{t.valued(trade.id)}</p>
-      <Workings ctx={ctx} trade={trade} risk={risk} measured={measured} group={group} isNew={false} held={psr.map((r) => r.allocated)} />
+      <Workings ctx={ctx} trade={trade} risk={risk} measured={measured} group={group} isNew={false} />
     </div>
   );
 }
@@ -713,50 +791,33 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
   );
 }
 
-function ChannelLimitsEditor({ ctx, state, dispatch }: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action> }) {
+function BookEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<Action> }) {
   const lang = useLang();
   const t = T[lang];
   return (
     <details className="more">
-      <summary>{t.limits}</summary>
-      <p className="quiet hint">{t.limitsHint}</p>
-      <div className="table-wrap">
-        <table className="table edit-table">
-          <thead>
-            <tr>
-              {t.limitsHead.map((h, i) => (
-                <th key={h}>{i === 0 ? h : `${h} · ${t.unit}`}</th>
+      <summary>{t.books}</summary>
+      <p className="quiet hint">{t.booksHint}</p>
+      {BOOKS.map((c) => (
+        <fieldset key={c} className="book">
+          <legend>{CHANNELS[c].label}</legend>
+          <label className="setting">
+            <input type="checkbox" checked={checksBook(state, c)} onChange={(e) => dispatch({ type: 'SWITCH_BOOK_CHECK', channel: c, on: e.target.checked })} />
+            <span>{t.bookCheck}</span>
+          </label>
+          <div className="book-parties" role="group" aria-label={t.bookParties}>
+            <span className="label">{t.bookParties}</span>
+            {state.lps
+              .filter((lp) => lp.channel === c)
+              .map((lp) => (
+                <label key={lp.id} className="setting">
+                  <input type="checkbox" checked={!state.channelOff.includes(lp.id)} onChange={(e) => dispatch({ type: 'SWITCH_ON_CHANNEL', lpId: lp.id, on: e.target.checked })} />
+                  <span>{partyName(lp.name, lang)}</span>
+                </label>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {state.groups.flatMap((g) =>
-              board(ctx, state, g.id).allocations.map((a) => {
-                const name = t.limitFor(CHANNELS[a.buffer.channel].label, partyName(g.name, lang));
-                return (
-                  <tr key={a.buffer.channel + g.id}>
-                    <td>
-                      {CHANNELS[a.buffer.channel].label} · {partyName(g.name, lang)}
-                    </td>
-                    <td>
-                      <NumInput
-                        label={name}
-                        className="wide"
-                        value={a.buffer.keepUsd / M}
-                        min={0}
-                        onChange={(v) => dispatch({ type: 'SET_CHANNEL_BUFFER', channel: a.buffer.channel, groupId: g.id, keepUsd: v * M })}
-                      />
-                    </td>
-                    <td>{mio(a.available)}</td>
-                    <td>{mio(a.filled)}</td>
-                    <td>{t.heldIs(mio(a.available), String(a.addOnPct), mio(a.held), PILLARS[a.pillar])}</td>
-                  </tr>
-                );
-              }),
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </fieldset>
+      ))}
     </details>
   );
 }

@@ -217,7 +217,6 @@ interface FlowCopy {
   desc: string;
   steps: [string, string][];
   focal: number[];
-  loop?: string; // label of the path from the last step back to the second
 }
 
 const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
@@ -245,16 +244,15 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [2],
     },
     channel: {
-      title: 'The channel fills within its limit',
-      desc: 'Flow: the desk holds room on the line for the largest trade it allows and sets the channel limit to that trade, the channel matches and fills within that limit without asking, the fill report names the counterparty and the held room becomes usage, and the desk holds room again and raises the limit if the line has room, which leads back to the channel matching.',
+      title: 'Checked against every counterparty',
+      desc: 'Flow: the desk checks the order against every counterparty that could fill it and reserves on each in one step, places the order without being able to choose who fills it, the channel matches and fills for no more than the order amount, and the fill turns one reservation into usage while the others are released.',
       steps: [
-        ['Hold room, then set the limit', 'the largest trade, per counterparty'],
-        ['Channel matches and fills', 'within the limit, without asking'],
-        ['Fill report: held becomes used', 'the counterparty is now known'],
-        ['Hold room again, raise limit', 'not if the line has no room'],
+        ['Check every counterparty', 'reserve on each, in one step'],
+        ['Place the order', 'the desk cannot choose who fills'],
+        ['Channel matches and fills', 'at most the order amount'],
+        ['Fill: reserved becomes used', 'release the others'],
       ],
-      focal: [0, 3],
-      loop: 'NEXT FILL',
+      focal: [0],
     },
   },
   zh: {
@@ -281,16 +279,15 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
       focal: [2],
     },
     channel: {
-      title: '場地按限額成交',
-      desc: '流程：交易台先在額度上按最大一筆預留場地切片，再把場地限額設為這一筆的金額；場地在限額之內撮合並成交，不問交易台；成交回報披露對手，切片轉為已用；額度有空間，交易台就再預留並補回限額，然後回到場地撮合。',
+      title: '對每個對手檢查',
+      desc: '流程：交易台對每個可能成交的對手檢查訂單，並在每一個那裡預佔，一步完成；掛單到場地，不能選誰來成交；場地撮合並成交，最多成交訂單的金額；成交後，成交的那個對手的預佔轉為已用，其餘對手的預佔釋放。',
       steps: [
-        ['先預留場地切片', '再設場地限額：最大一筆'],
-        ['場地撮合並成交', '限額之內，不問交易台'],
-        ['成交回報：切片轉為已用', '這時才知道對手'],
-        ['從可用額度補回切片', '額度沒有空間就不補'],
+        ['對每個對手檢查並預佔', '一步完成'],
+        ['掛單到場地', '不能選誰來成交'],
+        ['場地撮合並成交', '最多成交訂單的金額'],
+        ['成交：預佔轉為已用', '其餘對手的預佔釋放'],
       ],
-      focal: [0, 3],
-      loop: '下一筆',
+      focal: [0],
     },
   },
 };
@@ -305,13 +302,10 @@ export function ChannelFlow({ kind }: { kind: FlowKind }) {
   const TOP = 8;
   const y = (i: number) => TOP + i * (H + GAP);
   const height = y(c.steps.length - 1) + H + TOP;
-  const last = c.steps.length - 1;
-  const right = X + W;
-  const lane = right + 20; // the path a loop runs back up, beside the steps
   const line = { stroke: MUTED, strokeWidth: 1.2, markerEnd: `url(#${id}-arrow)` };
   return (
     <div className="diagram diagram-small">
-      <svg viewBox={`${X - 8} 0 ${W + 44} ${height}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
+      <svg viewBox={`${X - 8} 0 ${W + 16} ${height}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
         <title id={`${id}-title`}>{c.title}</title>
         <desc id={`${id}-desc`}>{c.desc}</desc>
         <defs>
@@ -319,15 +313,10 @@ export function ChannelFlow({ kind }: { kind: FlowKind }) {
             <polygon points="0 0, 8 3, 0 6" fill={MUTED} />
           </marker>
         </defs>
-        <rect x={X - 8} width={W + 44} height={height} fill={PAPER} />
+        <rect x={X - 8} width={W + 16} height={height} fill={PAPER} />
         {c.steps.slice(1).map((_, i) => (
           <line key={i} x1={CX} y1={y(i) + H} x2={CX} y2={y(i + 1)} {...line} />
         ))}
-        {c.loop && (
-          <path d={`M${right},${y(last) + H / 2} H${lane - 8} a8,8 0 0 0 8,-8 V${y(1) + H / 2 + 8} a8,8 0 0 0 -8,-8 H${right}`} fill="none" {...line}>
-            <title>{c.loop}</title>
-          </path>
-        )}
         {c.steps.map(([name, sub], i) => (
           <StepBox key={name} y={y(i)} name={name} sub={sub} focal={c.focal.includes(i)} />
         ))}

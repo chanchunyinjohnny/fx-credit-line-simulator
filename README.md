@@ -15,16 +15,16 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Check, reserve, fill.** A hedge is checked before it goes out. Sending it reserves the room; a fill turns the reservation into utilisation; a rejection releases it. Without the reservation, two hedges in flight could both pass and both fill.
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
 - **Two kinds of channel.** Where the counterparty is disclosed before the trade is final (a request for quote, a stream, or an order book that asks), the desk checks each trade. Where it is disclosed only after the trade, the desk cannot.
-- **A channel that discloses after the trade.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade, but it fills only within the limit the desk has set there. That limit is the largest trade the desk allows. The desk holds the room that trade would use on the credit line first, then sets the limit. A fill turns that room into utilisation, on the same line as every other hedge, and the desk tops the room up again from headroom. As the line fills the limit shrinks; at zero the channel stops filling with that counterparty. The Design view draws this on one line of 100 and lists what the desk can and cannot do on such a channel.
+- **A channel that discloses after the trade.** An order book matches first and names the counterparty afterwards, so the desk cannot choose the counterparty or refuse a trade. It does control its own order, which fills for no more than its own amount. So the order is checked against every counterparty that could fill it and reserved on each; the fill turns one reservation into utilisation and releases the rest. No limit held at the channel has to change. The counterparty with the tightest line sets how large the order can be, until it is switched off at the channel. A switch per channel turns the check off, leaving the channel's own limits as the only control. The Design view draws this with three counterparties and lists what the desk can and cannot do.
 - **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
 ## The four views
 
 | View | What it is for |
 | --- | --- |
-| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and the room held for a channel open on demand |
+| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and the switches for a channel that discloses after the trade open on demand |
 | Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
-| Formulae | The method on one page, then one swap and one fill on a channel followed step by step |
+| Formulae | The method on one page, then one swap, and one order on a book, followed step by step |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, a short flow for each way a hedge is checked, and the open questions |
 
 Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time, and lists every assumption the program makes with its status: verified against a public source, a simplification, invented, or still to be confirmed.
@@ -39,9 +39,8 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | Pre-settlement risk, no netting | sum of each hedge's exposure, per pillar |
 | Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
 | Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs. A payment due on the day it is dealt always counts in full |
-| Headroom | credit line − earlier days' hedges − today's fills − reservations − room held for channels |
-| Channel limit | min(largest trade the desk allows there, free room on the line ÷ add-on %) |
-| Room held for a channel | channel limit × add-on % of the longest order sent there, on that pillar and every shorter one |
+| Headroom | credit line − earlier days' hedges − today's fills − reservations |
+| An order on a book | checked against every counterparty switched on at the channel; the largest order is the smallest amount any of them has room for |
 
 ## How the numbers are checked
 
@@ -61,7 +60,7 @@ Pre-settlement and settlement risk are credit policy rather than pricing, so no 
 ```sh
 npm install
 npm run dev      # local server
-npm test         # 37 tests
+npm test         # 38 tests
 npm run build    # static site in dist/
 npm run oracle   # regenerate the QuantLib reference values (needs uv)
 ```
@@ -70,7 +69,7 @@ No server and no accounts: state is kept in the browser's local storage, and Res
 
 ## Scope and limits
 
-- Two kinds of channel: disclosed before the trade, where the desk knows the counterparty and checks before the trade is final (request for quote or stream), and disclosed after the trade, where the channel fills on limits it holds (an order book, here taking a single order type, a 1M USD/TWD NDF). An order book that names the counterparty and asks the desk after a match is of the first kind and is not modelled separately. Channels reached through a prime broker or clearing house are out of scope.
+- Two kinds of channel: disclosed before the trade, where the desk knows the counterparty and checks before the trade is final (request for quote or stream), and disclosed after the trade, where the order is checked against every counterparty that could fill it (an order book, here taking NDFs only, and filling an order once, in full). An order book that names the counterparty and asks the desk after a match is of the first kind and is not modelled separately. Channels reached through a prime broker or clearing house are out of scope.
 - One LP per hedge, up to USD 50 mio. Split orders are not modelled.
 - Standard tenors from overnight to one year. Forward-forward swaps and NDF fixing dates are not modelled.
 - QuantLib 1.44 carries no lunar holidays for Hong Kong or Taiwan after 2026, so USD/CNH and USD/TWD value dates in 2027 ignore them.
