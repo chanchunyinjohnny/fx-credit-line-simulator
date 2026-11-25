@@ -14,16 +14,16 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Time pillars.** Pre-settlement lines are set per maturity pillar. A hedge counts in the pillar it matures in and in every shorter one.
 - **Check, reserve, fill.** A hedge is checked before it goes out. Sending it reserves the room; a fill turns the reservation into utilisation; a rejection releases it. Without the reservation, two hedges in flight could both pass and both fill.
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
-- **A channel that checks credit itself.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade. The desk sets a limit on the channel and holds room on the credit line for all the channel could still fill. A fill moves from that room to utilisation, on the same line as every other hedge. The limit is recomputed each morning.
+- **A channel that checks credit itself.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade, but it fills only within the limit the desk has set there. The desk holds room on the credit line first and sets the limit to match. A fill turns that room into utilisation, on the same line as every other hedge, and the desk tops the room up again from headroom. As the line fills it tops up less; at zero the channel stops filling with that counterparty. The Design view lists what the desk can and cannot do on such a channel.
 - **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
 ## The four views
 
 | View | What it is for |
 | --- | --- |
-| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and channel limits open on demand |
+| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and the room held for a channel open on demand |
 | Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
-| Formulae | The method on one page, then one swap and one channel limit followed step by step |
+| Formulae | The method on one page, then one swap and one fill on a channel followed step by step |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, a short flow for each way a hedge is checked, and the open questions |
 
 Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time, and lists every assumption the program makes with its status: verified against a public source, a simplification, invented, or still to be confirmed.
@@ -39,7 +39,8 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
 | Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs. A payment due on the day it is dealt always counts in full |
 | Headroom | credit line − earlier days' hedges − today's fills − reservations − room held for channels |
-| Room held for a channel | channel limit left today × add-on % of the longest order sent there, on that pillar and every shorter one |
+| Room held for a channel | amount available on the channel × add-on % of the longest order sent there, on that pillar and every shorter one |
+| Amount available on a channel | min(amount the desk wants to keep there, free room on the line ÷ add-on %) |
 
 ## How the numbers are checked
 

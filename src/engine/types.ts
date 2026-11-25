@@ -66,12 +66,13 @@ export interface Lp {
   groupId: string;
 }
 
-/** The most a channel that checks credit itself may trade with one group in a day.
- *  The desk sets it on the channel; the channel counts it down by trade date. */
-export interface ChannelLimit {
+/** What the desk keeps available with one group on a channel that checks credit
+ *  itself: the most the channel can fill before the desk hears of it. The desk
+ *  tops it up after each fill for as long as the group's lines have room. */
+export interface ChannelBuffer {
   channel: Channel;
   groupId: string;
-  limitUsd: number; // notional
+  keepUsd: number; // notional
 }
 
 export interface AppState {
@@ -79,7 +80,7 @@ export interface AppState {
   market: MarketData;
   groups: Group[];
   lps: Lp[];
-  channelLimits: ChannelLimit[];
+  channelBuffers: ChannelBuffer[];
   addOnPct: number[]; // percent of notional, one per time pillar
   /** Internal variant: a negative market value reduces the add-on. Off is the standard method. */
   offsetNegativeMv?: boolean;

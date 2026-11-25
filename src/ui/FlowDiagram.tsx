@@ -64,7 +64,7 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
       pick: ['Pick best LP and reserve', 'checked again, in one step'],
       loop: 'RELEASE, NEXT',
       filled: ['Filled', 'reservation becomes usage'],
-      daily: ['Each day', 'revalue; recompute channel limits'],
+      daily: ['Each day', 'revalue what is still open'],
     },
   },
   zh: {
@@ -85,7 +85,7 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
       pick: ['選最佳 LP 並預佔額度', '再檢查一次，一步完成'],
       loop: '釋放，下一家',
       filled: ['成交', '預佔轉為已用額度'],
-      daily: ['每日', '重估未到期的對沖；重算場地限額'],
+      daily: ['每日', '重估未到期的對沖'],
     },
   },
 };
@@ -216,7 +216,8 @@ interface FlowCopy {
   title: string;
   desc: string;
   steps: [string, string][];
-  focal: number;
+  focal: number[];
+  loop?: string; // label of the path from the last step back to the second
 }
 
 const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
@@ -230,7 +231,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
         ['Send', 'the LP fills or rejects'],
         ['Fill: reserved becomes used', 'reject: release it'],
       ],
-      focal: 1,
+      focal: [1],
     },
     callback: {
       title: 'The desk checks after a match',
@@ -241,18 +242,19 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
         ['Check and reserve', 'answer within the time limit'],
         ['Fill: reserved becomes used', 'cancel: release it'],
       ],
-      focal: 2,
+      focal: [2],
     },
     channel: {
       title: 'The channel checks',
-      desc: 'Flow: each morning the desk sets the channel limit from the room the line has left and holds that room in full, the channel matches and fills without asking, and each fill report is booked as usage while the held room shrinks.',
+      desc: 'Flow: the desk holds room on the line and sets the channel limit to the same amount, the channel matches and fills within that limit without asking, the fill report names the counterparty and the held room becomes usage, and the desk holds room again and raises the limit if the line has room, which leads back to the channel matching.',
       steps: [
-        ['Each morning: set the limit', 'from the room the line has left'],
-        ['Hold that room on the line', 'in full, as if already used'],
-        ['Channel matches and fills', 'without asking the desk'],
-        ['Fill report: book as usage', 'the held room shrinks'],
+        ['Hold room, then set the limit', 'the same amount, per counterparty'],
+        ['Channel matches and fills', 'within the limit, without asking'],
+        ['Fill report: held becomes used', 'the counterparty is now known'],
+        ['Hold room again, raise limit', 'not if the line has no room'],
       ],
-      focal: 0,
+      focal: [0, 3],
+      loop: 'NEXT FILL',
     },
   },
   zh: {
@@ -265,7 +267,7 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
         ['送出', 'LP 成交或拒絕'],
         ['成交：預佔轉為已用', '拒絕：釋放預佔'],
       ],
-      focal: 1,
+      focal: [1],
     },
     callback: {
       title: '交易台檢查，撮合後',
@@ -276,18 +278,19 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
         ['檢查並預佔', '在時限內回覆通過或拒絕'],
         ['成交：預佔轉為已用', '取消：釋放預佔'],
       ],
-      focal: 2,
+      focal: [2],
     },
     channel: {
       title: '場地檢查',
-      desc: '流程：每朝交易台按額度的剩餘空間計算場地限額，並把整份記為場地切片；場地撮合並成交，不問交易台；成交回報記入已用，場地切片相應減少。',
+      desc: '流程：交易台先在額度上預留場地切片，再把場地限額設為同一金額；場地在限額之內撮合並成交，不問交易台；成交回報披露對手，切片轉為已用；額度有空間，交易台就再預留並補回限額，然後回到場地撮合。',
       steps: [
-        ['每朝：計算場地限額', '按額度的剩餘空間，推送到場地'],
-        ['整份記為場地切片', '當作已佔用'],
-        ['場地撮合並成交', '不問交易台'],
-        ['成交回報：記入已用', '場地切片相應減少'],
+        ['先預留場地切片', '再把場地限額設為同一金額'],
+        ['場地撮合並成交', '限額之內，不問交易台'],
+        ['成交回報：切片轉為已用', '這時才知道對手'],
+        ['從可用額度補回切片', '額度沒有空間就不補'],
       ],
-      focal: 0,
+      focal: [0, 3],
+      loop: '下一筆',
     },
   },
 };
@@ -302,9 +305,13 @@ export function ChannelFlow({ kind }: { kind: FlowKind }) {
   const TOP = 8;
   const y = (i: number) => TOP + i * (H + GAP);
   const height = y(c.steps.length - 1) + H + TOP;
+  const last = c.steps.length - 1;
+  const right = X + W;
+  const lane = right + 20; // the path a loop runs back up, beside the steps
+  const line = { stroke: MUTED, strokeWidth: 1.2, markerEnd: `url(#${id}-arrow)` };
   return (
     <div className="diagram diagram-small">
-      <svg viewBox={`${X - 8} 0 ${W + 16} ${height}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
+      <svg viewBox={`${X - 8} 0 ${W + 44} ${height}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
         <title id={`${id}-title`}>{c.title}</title>
         <desc id={`${id}-desc`}>{c.desc}</desc>
         <defs>
@@ -312,12 +319,17 @@ export function ChannelFlow({ kind }: { kind: FlowKind }) {
             <polygon points="0 0, 8 3, 0 6" fill={MUTED} />
           </marker>
         </defs>
-        <rect x={X - 8} width={W + 16} height={height} fill={PAPER} />
+        <rect x={X - 8} width={W + 44} height={height} fill={PAPER} />
         {c.steps.slice(1).map((_, i) => (
-          <line key={i} x1={CX} y1={y(i) + H} x2={CX} y2={y(i + 1)} stroke={MUTED} strokeWidth={1.2} markerEnd={`url(#${id}-arrow)`} />
+          <line key={i} x1={CX} y1={y(i) + H} x2={CX} y2={y(i + 1)} {...line} />
         ))}
+        {c.loop && (
+          <path d={`M${right},${y(last) + H / 2} H${lane - 8} a8,8 0 0 0 8,-8 V${y(1) + H / 2 + 8} a8,8 0 0 0 -8,-8 H${right}`} fill="none" {...line}>
+            <title>{c.loop}</title>
+          </path>
+        )}
         {c.steps.map(([name, sub], i) => (
-          <StepBox key={name} y={y(i)} name={name} sub={sub} focal={i === c.focal} />
+          <StepBox key={name} y={y(i)} name={name} sub={sub} focal={c.focal.includes(i)} />
         ))}
       </svg>
     </div>

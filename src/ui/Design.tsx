@@ -27,11 +27,27 @@ const T = {
       channel: 'An order book that fills on limits it holds: EBS Market.',
     },
     legend: 'The shaded step is where the desk decides on the credit line.',
+    canHead: 'Where the channel checks: what the desk can and cannot do',
+    can: 'Can',
+    canList: [
+      'Keep every counterparty within its line. The channel fills only within the limit, and the room is held before the limit is set.',
+      'Book each fill on the same line as every other hedge, as soon as the fill names the counterparty.',
+      'Stop filling with a counterparty. With no room left, its limit on the channel is zero.',
+    ],
+    cannot: 'Cannot',
+    cannotList: [
+      'Approve or refuse a single trade, or choose the counterparty.',
+      'Avoid idle room. Some is held for every counterparty on the channel, whether or not it trades.',
+      'Hold the exact amount. The room is sized on the longest order sent there, before any netting.',
+      'Work where limits on the channel cannot be changed during the day. That falls back to one fixed slice a day.',
+    ],
     ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + held for channels + headroom.',
     scope: 'Scope: FX swap, forward and NDF. A channel reached through a prime broker or clearing house faces that one counterparty, so it has one line of its own.',
+    premise: 'The premise',
+    premiseText:
+      'The desk asks the credit owner for a fixed limit each day, counted only against its own hedges. The condition is that the desk keeps its own part within that limit. This design is how it does so.',
     confirmed: 'Confirmed',
     answers: [
-      'The credit owner sets a fixed limit for the desk each day. The desk counts only its own hedges against it.',
       'A failed check blocks the hedge. The system has no exceptions; a trader handles those by hand.',
       'Whether exposure is netted is a setting for each banking group.',
       'A payment due on the day it is dealt always counts in full. A leg that can go through CLS carries no settlement risk.',
@@ -42,7 +58,7 @@ const T = {
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
       'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
-      'Room held for a channel is the limit left times the add-on of the longest order sent there. The limit is recomputed each morning.',
+      'Room held for a channel is the amount it can fill times the add-on of the longest order sent there. It is topped up after each fill.',
     ],
   },
   zh: {
@@ -68,11 +84,26 @@ const T = {
       channel: '按自己持有的限額成交的訂單簿：EBS Market。',
     },
     legend: '有底色的一步，是交易台決定額度夠不夠的地方。',
+    canHead: '場地檢查的渠道：做得到和做不到的',
+    can: '做得到',
+    canList: [
+      '每個對手都不會超額。場地只在限額之內成交，而額度是先預留、後設限額。',
+      '成交回報一披露對手，就記在同一條額度上，和其他對沖一樣。',
+      '停止和某個對手成交。額度沒有空間時，它在場地上的限額就是零。',
+    ],
+    cannot: '做不到',
+    cannotList: [
+      '批准或拒絕個別成交，或者選擇對手。',
+      '避免額度閒置。場地上每個對手都要預留一份，不論有沒有成交。',
+      '預留得剛剛好。只能按送往該場地最長期限的訂單預留，而且未計淨額。',
+      '在場地不能即日改限額時運作。那就只能退回每日固定切一份。',
+    ],
     ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 場地切片 + 可用額度。',
     scope: '適用範圍：外匯掉期、遠期和 NDF。經主經紀商或清算所交易的渠道，對手只有那一家，另有一條自己的額度。',
+    premise: '前提',
+    premiseText: '交易台向授信管理部門要求每日一個固定額度，只計交易台自己的對沖。條件是交易台能管好自己的這一部分。這個設計就是為了做到這一點。',
     confirmed: '已確認',
     answers: [
-      '授信管理部門每日給交易台一個固定額度。交易台只計自己的對沖。',
       '檢查不通過就攔截。系統內沒有例外，例外由交易員人手處理。',
       '是否按淨額計，每個銀行集團可以設定。',
       '當日交收的款項一律計全額。可以經 CLS 的那一邊沒有結算風險。',
@@ -83,7 +114,7 @@ const T = {
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
       'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',
-      '場地切片 = 場地尚餘限額 × 送往該場地最長期限訂單的附加因子。限額每朝重算。',
+      '場地切片 = 場地現在可成交的金額 × 送往該場地最長期限訂單的附加因子。每次成交後補回。',
     ],
   },
 } as const;
@@ -139,7 +170,30 @@ export function Design() {
       </div>
       <p className="quiet">{t.legend}</p>
       <p>{t.ledger}</p>
+
+      <h3>{t.canHead}</h3>
+      <div className="grid-two can-cannot">
+        <section>
+          <h4>{t.can}</h4>
+          <ul>
+            {t.canList.map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <h4>{t.cannot}</h4>
+          <ul>
+            {t.cannotList.map((x) => (
+              <li key={x}>{x}</li>
+            ))}
+          </ul>
+        </section>
+      </div>
       <p className="quiet">{t.scope}</p>
+
+      <h2>{t.premise}</h2>
+      <p>{t.premiseText}</p>
 
       <h2>{t.confirmed}</h2>
       <ol className="plain">

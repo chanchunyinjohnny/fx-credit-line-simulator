@@ -178,6 +178,10 @@ body { margin: 0; background: #fafaf7; }
 .method-row h3 { margin: 0; }
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 26px 0 0; }
 .grid-two h2 { margin-top: 0; }
+.can-cannot { margin-top: 8px; gap: 32px; }
+.can-cannot h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.can-cannot ul { margin: 0; padding-left: 18px; }
+.can-cannot li { margin-bottom: 6px; }
 .grid-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 18px 0 20px; }
 .grid-three h3 { margin: 0 0 4px; }
 .grid-three .quiet { margin: 0 0 12px; min-height: 2.9em; }

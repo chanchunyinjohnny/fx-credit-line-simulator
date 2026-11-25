@@ -42,8 +42,11 @@ const T = {
     chFull: 'The channel fills it',
     chPart: (x: string) => `The channel fills only USD ${x} mio`,
     chNone: 'The channel does not fill it',
-    chWhy: (ch: string, g: string, left: string) => `${ch} checks credit at the match and does not ask the desk. Its limit with ${g} has USD ${left} mio left today.`,
-    chMoves: (x: string, g: string) => ` USD ${x} mio moves from room held for the channel to in use. What ${g}'s lines carry does not change.`,
+    chWhy: (ch: string, g: string, left: string) => `${ch} checks credit at the match and does not ask the desk. It can fill up to USD ${left} mio with ${g} now.`,
+    chBooks: (x: string) => ` The fill is booked as USD ${x} mio in use.`,
+    chTopUp: ' The desk then holds room again and tops the channel up.',
+    chTopUpPart: (x: string) => ` The line has room to top the channel up to USD ${x} mio only.`,
+    chTopUpNone: ' The line then has no room left, so the channel is not topped up and stops filling.',
     chFill: 'Channel fills',
     at: (dates: string, rates: string) => `${dates} at ${rates}`,
     send: 'Send and reserve',
@@ -80,11 +83,11 @@ const T = {
     payNet: 'Payment netting',
     addOn: 'Add-on, %',
     offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
-    limits: 'Channel limits: room handed to a channel that checks credit itself',
+    limits: 'Room held for a channel that checks credit itself',
     limitsHint:
-      'The desk sets a limit on the channel and holds the same room on the credit line. It can raise a limit only while the line has room, and cannot lower it below what the channel has filled today. The channel starts counting again each morning.',
-    limitsHead: ['Channel and group', 'Limit today', 'Filled today', 'Left', 'Held on the credit line'],
-    limitFor: (ch: string, g: string) => `${ch} limit with ${g}`,
+      'The channel can fill this much with a group without asking. The desk holds the same room on the credit line first, then sets the limit on the channel. After each fill it holds room again and tops the limit up. As the line fills it tops up less, and at zero the channel stops filling with that group.',
+    limitsHead: ['Channel and group', 'Keep available', 'Available now', 'Filled today', 'Held on the credit line'],
+    limitFor: (ch: string, g: string) => `Keep available on ${ch} with ${g}`,
     heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}, on ${pillar} and shorter`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
@@ -121,8 +124,11 @@ const T = {
     chFull: '場地會成交',
     chPart: (x: string) => `場地只成交 ${x} 百萬美元`,
     chNone: '場地不會成交',
-    chWhy: (ch: string, g: string, left: string) => `${ch} 在撮合時自己檢查額度，不會問交易台。它對 ${g}的限額今日尚餘 ${left} 百萬美元。`,
-    chMoves: (x: string, g: string) => `${x} 百萬美元由場地切片轉為已用。${g}的額度佔用總數不變。`,
+    chWhy: (ch: string, g: string, left: string) => `${ch} 在撮合時自己檢查額度，不會問交易台。它現在最多可以和 ${g}成交 ${left} 百萬美元。`,
+    chBooks: (x: string) => `成交後 ${x} 百萬美元記入已用。`,
+    chTopUp: '交易台隨即再預留額度，補回場地切片。',
+    chTopUpPart: (x: string) => `額度只夠把場地切片補回到 ${x} 百萬美元。`,
+    chTopUpNone: '之後額度沒有空間，不再補回，場地不會再成交。',
     chFill: '場地成交',
     at: (dates: string, rates: string) => `${dates}，匯率 ${rates}`,
     send: '送出並預佔額度',
@@ -159,10 +165,10 @@ const T = {
     payNet: '支付淨額結算',
     addOn: '附加因子 %',
     offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
-    limits: '場地限額：交給自行檢查額度的場地的份額',
-    limitsHint: '交易台在場地設定限額，並在授信額度上預留同等份額。額度有空間才可調高；不可調低於場地今日已成交的金額。場地每朝重新計數。',
-    limitsHead: ['場地和集團', '今日限額', '今日已成交', '尚餘', '授信額度上預留'],
-    limitFor: (ch: string, g: string) => `${ch} 對 ${g}的限額`,
+    limits: '場地切片：為自行檢查額度的場地預留的額度',
+    limitsHint: '場地不用問交易台，最多可以和一個集團成交這個金額。交易台先在授信額度上預留同等份額，再設場地限額。每次成交後再預留，補回限額。額度越滿，補得越少；到零時，場地不再和這個集團成交。',
+    limitsHead: ['場地和集團', '保持可成交', '現在可成交', '今日已成交', '授信額度上預留'],
+    limitFor: (ch: string, g: string) => `${ch} 對 ${g}保持可成交`,
     heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}，佔 ${pillar} 及更短的期限檔`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,
@@ -447,8 +453,9 @@ function ChannelVerdict({ order, fill, channel, onFill }: { order: Trade; fill: 
           <Status ok={full}>{full ? t.chFull : fill.trade ? t.chPart(mio(fill.fillUsd)) : t.chNone}</Status>
         </p>
         <p className="verdict-why">
-          {t.chWhy(channel, g, mio(fill.left))}
-          {fill.risk && t.chMoves(mio(fill.risk.exposure), g)}
+          {t.chWhy(channel, g, mio(fill.available))}
+          {fill.risk && t.chBooks(mio(fill.risk.exposure))}
+          {fill.risk && (fill.availableAfter >= fill.keepUsd - 0.5 ? t.chTopUp : fill.availableAfter > 0.5 ? t.chTopUpPart(mio(fill.availableAfter)) : t.chTopUpNone)}
         </p>
         <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
       </div>
@@ -725,24 +732,24 @@ function ChannelLimitsEditor({ ctx, state, dispatch }: { ctx: Ctx; state: AppSta
           <tbody>
             {state.groups.flatMap((g) =>
               board(ctx, state, g.id).allocations.map((a) => {
-                const name = t.limitFor(CHANNELS[a.limit.channel].label, partyName(g.name, lang));
+                const name = t.limitFor(CHANNELS[a.buffer.channel].label, partyName(g.name, lang));
                 return (
-                  <tr key={a.limit.channel + g.id}>
+                  <tr key={a.buffer.channel + g.id}>
                     <td>
-                      {CHANNELS[a.limit.channel].label} · {partyName(g.name, lang)}
+                      {CHANNELS[a.buffer.channel].label} · {partyName(g.name, lang)}
                     </td>
                     <td>
                       <NumInput
                         label={name}
                         className="wide"
-                        value={a.limit.limitUsd / M}
+                        value={a.buffer.keepUsd / M}
                         min={0}
-                        onChange={(v) => dispatch({ type: 'SET_CHANNEL_LIMIT', channel: a.limit.channel, groupId: g.id, limitUsd: v * M })}
+                        onChange={(v) => dispatch({ type: 'SET_CHANNEL_BUFFER', channel: a.buffer.channel, groupId: g.id, keepUsd: v * M })}
                       />
                     </td>
+                    <td>{mio(a.available)}</td>
                     <td>{mio(a.filled)}</td>
-                    <td>{mio(a.left)}</td>
-                    <td>{t.heldIs(mio(a.left), String(a.addOnPct), mio(a.held), PILLARS[a.pillar])}</td>
+                    <td>{t.heldIs(mio(a.available), String(a.addOnPct), mio(a.held), PILLARS[a.pillar])}</td>
                   </tr>
                 );
               }),

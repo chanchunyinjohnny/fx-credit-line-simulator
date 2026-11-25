@@ -1,7 +1,7 @@
 import { OUTRIGHT_TENORS, PAIRS, SWAP_TENORS, isWeekend, nextWeekday, valueDates } from './calendar';
 import { CHANNELS } from './channels';
 import { defaultState } from './defaults';
-import { allocationsOf, channelFill, checkTrade, maxChannelLimit } from './lines';
+import { channelFill, checkTrade } from './lines';
 import { usdPerUnit } from './market';
 import { makeCtx, type Ctx } from './risk';
 import type { AppState, Channel, ISODate, Ticket, Trade } from './types';
@@ -66,7 +66,7 @@ export function buildFor(ctx: Ctx, s: AppState, ticket: Ticket): Trade | { error
 export type Action =
   | { type: 'SEND'; ticket: Ticket }
   | { type: 'CHANNEL_FILL'; ticket: Ticket }
-  | { type: 'SET_CHANNEL_LIMIT'; channel: Channel; groupId: string; limitUsd: number }
+  | { type: 'SET_CHANNEL_BUFFER'; channel: Channel; groupId: string; keepUsd: number }
   | { type: 'FILL'; id: string }
   | { type: 'REJECT'; id: string }
   | { type: 'NEXT_DAY' }
@@ -77,31 +77,13 @@ export type Action =
 /** The holiday tables end here. */
 export const LAST_DATE = '2029-12-31';
 
-/** Set one channel limit. It cannot go below what the channel has filled today,
- *  and it can only rise while the group's lines have room to hold the extra. */
-function setChannelLimit(s: AppState, channel: Channel, groupId: string, limitUsd: number): AppState {
-  const limit = s.channelLimits.find((l) => l.channel === channel && l.groupId === groupId);
-  if (!limit || !(limitUsd >= 0)) return s;
-  const ctx = makeCtx(s);
-  const filled = allocationsOf(ctx, s, groupId).find((a) => a.limit === limit)!.filled;
-  const next = Math.max(filled, Math.min(limitUsd, maxChannelLimit(ctx, s, limit)));
-  return next === limit.limitUsd ? s : { ...s, channelLimits: s.channelLimits.map((l) => (l === limit ? { ...l, limitUsd: next } : l)) };
-}
-
-/** Each morning the channels start counting again, so every limit is checked
- *  against what the lines can still hold and cut where it no longer fits. */
-function fitChannelLimits(s: AppState): AppState {
-  return s.channelLimits.reduce((state, l) => setChannelLimit(state, l.channel, l.groupId, l.limitUsd), s);
-}
-
 /** Move to a later business date. Quotes do not live overnight: anything still
  *  in flight lapses and its reservation is released. */
-const goTo = (s: AppState, date: ISODate): AppState =>
-  fitChannelLimits({
-    ...s,
-    businessDate: date,
-    trades: s.trades.map((t) => (t.status === 'IN_FLIGHT' ? { ...t, status: 'EXPIRED' } : t)),
-  });
+const goTo = (s: AppState, date: ISODate): AppState => ({
+  ...s,
+  businessDate: date,
+  trades: s.trades.map((t) => (t.status === 'IN_FLIGHT' ? { ...t, status: 'EXPIRED' } : t)),
+});
 
 const setStatus = (s: AppState, id: string, status: Trade['status']): AppState => ({
   ...s,
@@ -118,15 +100,17 @@ export function reducer(s: AppState, a: Action): AppState {
       return { ...s, trades: [...s.trades, { ...built, id: `H${s.nextId}` }], nextId: s.nextId + 1 };
     }
     case 'CHANNEL_FILL': {
-      // The channel has matched and filled against its own limit. The desk books what it is told.
+      // The channel has matched and filled against its own limit. The desk books what it is told;
+      // the room held for the channel is worked out afresh from the lines, which is the top-up.
       const ctx = makeCtx(s);
       const built = buildFor(ctx, s, a.ticket);
       if ('error' in built || channelOf(s, a.ticket.lpId).checkedBy !== 'CHANNEL') return s;
       const { trade } = channelFill(ctx, s, built);
       return trade ? { ...s, trades: [...s.trades, { ...trade, id: `H${s.nextId}` }], nextId: s.nextId + 1 } : s;
     }
-    case 'SET_CHANNEL_LIMIT':
-      return setChannelLimit(s, a.channel, a.groupId, a.limitUsd);
+    case 'SET_CHANNEL_BUFFER':
+      if (!(a.keepUsd >= 0)) return s;
+      return { ...s, channelBuffers: s.channelBuffers.map((b) => (b.channel === a.channel && b.groupId === a.groupId ? { ...b, keepUsd: a.keepUsd } : b)) };
     case 'FILL':
       return setStatus(s, a.id, 'FILLED');
     case 'REJECT':
@@ -149,14 +133,14 @@ export function reducer(s: AppState, a: Action): AppState {
   }
 }
 
-const STORAGE_KEY = 'fx-credit-line-simulator/v2';
+const STORAGE_KEY = 'fx-credit-line-simulator/v3';
 
 export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as AppState;
-      if (s.businessDate && s.market?.pairs && Array.isArray(s.trades) && Array.isArray(s.groups) && Array.isArray(s.channelLimits)) return s;
+      if (s.businessDate && s.market?.pairs && Array.isArray(s.trades) && Array.isArray(s.groups) && Array.isArray(s.channelBuffers)) return s;
     }
   } catch {
     // Unreadable or unavailable storage: start fresh.

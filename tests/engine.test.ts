@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import golden from '../src/data/golden.json';
 import { PILLARS, pillarEnds, pillarIndex, spotDate, tenorDate, tomDate } from '../src/engine/calendar';
 import { defaultState } from '../src/engine/defaults';
-import { board, channelFill, checkTrade, maxChannelLimit } from '../src/engine/lines';
+import { board, channelFill, checkTrade } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
 import { exposureOf, makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
 import { nextPillarStep, rollSummary } from '../src/engine/roll';
@@ -273,44 +273,62 @@ describe('check, reserve, fill', () => {
 });
 
 describe('a channel that checks credit itself', () => {
-  // Bank B on EBS Market: channel limit USD 50m of 1M NDF. The 1M add-on is 1%,
-  // so 500,000 is held on the O/N, 1W and 1M lines and nothing beyond.
+  // Bank B on EBS Market: the desk keeps USD 20m of 1M NDF available. The 1M add-on
+  // is 1%, so 200,000 is held on the O/N, 1W and 1M lines and nothing beyond.
   const order = (amount: number): Ticket => ({ product: 'NDF', pair: 'USDTWD', side: 'BUY', amount, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' });
   const rowsOf = (s: AppState) => board(makeCtx(s), s, 'B').psr;
+  const available = (s: AppState) => board(makeCtx(s), s, 'B').allocations[0].available;
+  const lineAt1M = (line: number) => reducer(defaultState(), { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = line) });
 
-  it('holds room for all the channel could still fill today', () => {
+  it('holds room for all the channel can fill before the desk hears of it', () => {
     const psr = rowsOf(defaultState());
-    expect(psr.map((r) => r.allocated)).toEqual([500_000, 500_000, 500_000, 0, 0, 0]);
-    expect(psr[2]).toMatchObject({ used: 500_000, headroom: 3_500_000 });
+    expect(psr.map((r) => r.allocated)).toEqual([200_000, 200_000, 200_000, 0, 0, 0]);
+    expect(psr[2]).toMatchObject({ used: 200_000, headroom: 3_800_000 });
   });
 
   it('blocks a hedge on another channel that only the held room keeps out', () => {
-    // 1M line cut to 700,000. EUR 20m 1M swap: 23.3m x 1% = 233,000. With 500,000 held: 733,000.
-    let s = reducer(defaultState(), { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = 700_000) });
+    // 1M line cut to 400,000. EUR 20m 1M swap: 23.3m x 1% = 233,000. With 200,000 held: 433,000.
+    let s = lineAt1M(400_000);
     const swap = ticket({ lpId: 'B-360T', tenor: '1M' });
     const check = checkTrade(makeCtx(s), s, deal(s, swap));
-    expect(check.psr[2].after).toBeCloseTo(733_000, 6);
+    expect(check.psr[2].after).toBeCloseTo(433_000, 6);
     expect(check.ok).toBe(false);
     expect(check.blockedByAllocation).toBe(true);
 
-    // Lower the channel limit to USD 40m: 400,000 held, 633,000 in all.
-    s = reducer(s, { type: 'SET_CHANNEL_LIMIT', channel: 'EBSM', groupId: 'B', limitUsd: 40 * M });
+    // Keep USD 10m on the channel instead: 100,000 held, 333,000 in all.
+    s = reducer(s, { type: 'SET_CHANNEL_BUFFER', channel: 'EBSM', groupId: 'B', keepUsd: 10 * M });
     expect(checkTrade(makeCtx(s), s, deal(s, swap)).ok).toBe(true);
   });
 
-  it('books a fill as utilisation on the same lines, out of the held room', () => {
-    let s = reducer(defaultState(), { type: 'CHANNEL_FILL', ticket: order(20 * M) });
+  it('books a fill as utilisation, then tops the channel up out of headroom', () => {
+    const s0 = defaultState();
+    const s = reducer(s0, { type: 'CHANNEL_FILL', ticket: order(20 * M) });
     expect(s.trades.map((t) => [t.id, t.status, t.amount])).toEqual([['H1', 'FILLED', 20 * M]]);
-    // 20m x 1% = 200,000 in use; 30m left on the channel x 1% = 300,000 still held. The total has not moved.
-    expect(rowsOf(s)[2]).toMatchObject({ today: 200_000, allocated: 300_000, used: 500_000 });
+    // 20m x 1% = 200,000 now in use. The channel is topped up to 20m again: 200,000 held.
+    // The fill has come out of headroom: 3,800,000 before, 3,600,000 after.
+    expect(rowsOf(s)[2]).toMatchObject({ today: 200_000, allocated: 200_000, used: 400_000, headroom: 3_600_000 });
+    expect(available(s)).toBe(20 * M);
+    // The channel never fills more than is available there, whatever the order.
+    expect(channelFill(makeCtx(s0), s0, deal(s0, order(50 * M)))).toMatchObject({ available: 20 * M, fillUsd: 20 * M });
+  });
 
-    // The channel fills only what its limit has left, then nothing.
-    const cut = channelFill(makeCtx(s), s, deal(s, order(40 * M)));
-    expect([cut.left, cut.fillUsd]).toEqual([30 * M, 30 * M]);
-    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(40 * M) });
-    expect(s.trades[1].amount).toBe(30 * M);
+  it('tops up less as the line fills, and at zero the channel stops', () => {
+    // 1M line 500,000: room for USD 50m of 1M NDF in all.
+    let s = lineAt1M(500_000);
+    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // 200,000 in use, 300,000 free
+    expect(available(s)).toBe(20 * M);
+    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // 400,000 in use, 100,000 free
+    expect(available(s)).toBe(10 * M); // 100,000 / 1%
+    expect(rowsOf(s)[2]).toMatchObject({ today: 400_000, allocated: 100_000, used: 500_000, headroom: 0 });
+
+    const last = channelFill(makeCtx(s), s, deal(s, order(20 * M)));
+    expect(last).toMatchObject({ fillUsd: 10 * M, availableAfter: 0 });
+    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) }); // only 10m fills
+    expect(s.trades[2].amount).toBe(10 * M);
     expect(rowsOf(s)[2]).toMatchObject({ today: 500_000, allocated: 0, used: 500_000 });
-    expect(reducer(s, { type: 'CHANNEL_FILL', ticket: order(10 * M) })).toBe(s);
+    expect(available(s)).toBe(0);
+    expect(reducer(s, { type: 'CHANNEL_FILL', ticket: order(10 * M) })).toBe(s); // nothing left to fill
+    expect(rowsOf(s).every((r) => r.used <= r.line + 0.01)).toBe(true);
   });
 
   it('is not checked by the desk, and takes one kind of order', () => {
@@ -321,32 +339,11 @@ describe('a channel that checks credit itself', () => {
     expect(buildFor(makeCtx(s), s, { ...order(20 * M), tenor: '3M' })).toEqual({ error: 'CHANNEL_ORDER' });
   });
 
-  it('a limit rises only while the lines have room and never falls below what is filled', () => {
-    let s = defaultState();
-    // Bank B's tightest line up to 1M is 4m. 4m / 1% = USD 400m of notional.
-    expect(maxChannelLimit(makeCtx(s), s, s.channelLimits[1])).toBe(400 * M);
-    s = reducer(s, { type: 'SET_CHANNEL_LIMIT', channel: 'EBSM', groupId: 'B', limitUsd: 900 * M });
-    expect(s.channelLimits[1].limitUsd).toBe(400 * M);
-    expect(rowsOf(s)[2].headroom).toBeCloseTo(0, 6);
-
-    s = reducer(s, { type: 'CHANNEL_FILL', ticket: order(20 * M) });
-    s = reducer(s, { type: 'SET_CHANNEL_LIMIT', channel: 'EBSM', groupId: 'B', limitUsd: 5 * M });
-    expect(s.channelLimits[1].limitUsd).toBe(20 * M);
-  });
-
-  it('starts counting again each morning, and the limit is cut to what the lines still hold', () => {
-    let s = reducer(defaultState(), { type: 'CHANNEL_FILL', ticket: order(50 * M) }); // the whole limit: 500,000 in use
-    s = reducer(s, { type: 'EDIT', change: (d) => void (d.groups[1].psrLines[2] = 800_000) });
-    const next = reducer(s, { type: 'NEXT_DAY' });
-    // Yesterday's fill still uses about 500,000, so about 300,000 is free: USD 30m of notional, not 50m.
-    const limit = next.channelLimits[1].limitUsd;
-    expect(limit).toBeGreaterThan(29 * M);
-    expect(limit).toBeLessThanOrEqual(30 * M);
-    const row = rowsOf(next)[2];
-    expect(row.earlier).toBeGreaterThan(499_000);
-    expect(row.used).toBeLessThanOrEqual(row.line + 0.01);
-    expect(rollSummary(s, next).limitCuts).toEqual([{ channel: 'EBSM', groupName: 'Bank B', from: 50 * M, to: limit }]);
-    // Bank A's limit still fits and is left alone.
-    expect(next.channelLimits[0].limitUsd).toBe(100 * M);
+  it('the next day yesterday\'s fill is still in use and the channel is kept topped up', () => {
+    let s = reducer(defaultState(), { type: 'CHANNEL_FILL', ticket: order(20 * M) });
+    s = reducer(s, { type: 'NEXT_DAY' });
+    const a = board(makeCtx(s), s, 'B').allocations[0];
+    expect([a.filled, a.available]).toEqual([0, 20 * M]);
+    expect(rowsOf(s)[2].earlier).toBeGreaterThan(199_000);
   });
 });
