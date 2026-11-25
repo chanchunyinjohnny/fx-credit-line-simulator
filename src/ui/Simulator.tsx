@@ -3,10 +3,11 @@ import { OUTRIGHT_TENORS, PAIRS, PAIR_IDS, PILLARS, SWAP_TENORS } from '../engin
 import { CHANNELS, checksBook } from '../engine/channels';
 import { board, checkTrade, groupOf, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
 import { makeCtx, valueTrade, type Ctx } from '../engine/risk';
-import { bookOf, buildTrade, candidates, largestThatFits, type Action, type TicketError } from '../engine/state';
-import type { AppState, Channel, Group, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
+import { usdPerUnit } from '../engine/market';
+import { MAX_AMOUNT_USD, bookOf, buildTrade, candidates, largestThatFits, type Action, type TicketError } from '../engine/state';
+import type { AppState, Channel, Group, PairId, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
 import { NumInput, Status } from './bits';
-import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, partyName, rate, shortDay, signedMio } from './format';
+import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, num, partyName, rate, shortDay, signedMio } from './format';
 import { useLang, type Lang } from './i18n';
 import { BarLegend, LineBar } from './LineBar';
 import { Workings } from './Workings';
@@ -97,12 +98,12 @@ const T = {
       NDF_ONLY: (p: string) => `${p} trades as an NDF only.`,
       TENOR: () => 'This tenor is not available for this product.',
       AMOUNT: () => 'Enter an amount.',
-      TOO_LARGE: () => 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.',
+      TOO_LARGE: (_p: string, max: string) => `A hedge here can be up to USD 50 mio, which is ${max} mio. Enter that or less, or enter a larger order as several hedges.`,
       NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
       BOOK_PRODUCT: () => 'This channel takes NDFs only here.',
       BOOK_EMPTY: () => 'No counterparty is switched on at this channel.',
-    } as Record<TicketError, (pair: string) => string>,
+    } as Record<TicketError, (pair: string, max: string) => string>,
   },
   zh: {
     product: '產品',
@@ -181,12 +182,12 @@ const T = {
       NDF_ONLY: (p: string) => `${p} 只能做 NDF。`,
       TENOR: () => '這個產品沒有這個期限。',
       AMOUNT: () => '請輸入金額。',
-      TOO_LARGE: () => '本流程只涵蓋單一 LP、5,000 萬美元以內的對沖。較大的單請分成幾筆輸入。',
+      TOO_LARGE: (_p: string, max: string) => `本程式每筆對沖最多 5,000 萬美元，即 ${max} 百萬。請輸入這個數或以下；較大的單分成幾筆輸入。`,
       NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
       BOOK_PRODUCT: () => '這個場地在本程式只做 NDF。',
       BOOK_EMPTY: () => '這個場地上沒有開通的對手。',
-    } as Record<TicketError, (pair: string) => string>,
+    } as Record<TicketError, (pair: string, max: string) => string>,
   },
 };
 
@@ -195,6 +196,12 @@ function withProduct(t: Ticket, product: Product): Ticket {
   const tenors = product === 'SWAP' ? SWAP_TENORS : OUTRIGHT_TENORS;
   return { ...t, product, pair, tenor: tenors.includes(t.tenor) ? t.tenor : '3M', settlement: 'AUTO' };
 }
+
+/** The largest amount one ticket may carry, in the pair's base currency: 'EUR 42.9'. */
+const largestTicket = (ctx: Ctx, pair: PairId) => {
+  const base = PAIRS[pair].base;
+  return `${base} ${num(Math.floor(MAX_AMOUNT_USD / usdPerUnit(ctx.market, base) / 1e5) / 10, 1)}`;
+};
 
 const lpLabel = (s: AppState, lpId: string, lang: Lang) => {
   const lp = s.lps.find((l) => l.id === lpId)!;
@@ -322,7 +329,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
           <>
             {'error' in trades ? (
               <p className="alert" role="alert">
-                {t.errors[trades.error](PAIRS[ticket.pair].label)}
+                {t.errors[trades.error](PAIRS[ticket.pair].label, largestTicket(ctx, ticket.pair))}
               </p>
             ) : (
               <Verdict trade={check.trade} check={check} onSend={() => dispatch({ type: 'SEND', ticket })} />
@@ -491,7 +498,7 @@ function BookPanel(p: {
   if (p.error) {
     return (
       <p className="alert" role="alert">
-        {t.errors[p.error](PAIRS[ticket.pair].label)}
+        {t.errors[p.error](PAIRS[ticket.pair].label, largestTicket(ctx, ticket.pair))}
       </p>
     );
   }
