@@ -13,7 +13,8 @@ import { BarLegend, LineBar } from './LineBar';
 import { Workings } from './Workings';
 
 const M = 1_000_000;
-const DEFAULT_TICKET: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 20 * M, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
+/** The ticket opens with no amount, so the lines first show only what is in use and reserved. */
+const DEFAULT_TICKET: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 0, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
 const POINT_TENORS: Tenor[] = ['ON', 'TN', 'SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
 const RATE_TENORS: RateTenor[] = ['ON', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'];
 
@@ -32,6 +33,8 @@ const T = {
     bookGroup: 'A channel that names the counterparty after the trade. A tick means every counterparty there has room for this order.',
     hasRoom: ', has room',
     noRoom: ', no room',
+    idle: (g: string) => `These are ${g}'s lines as they stand. Enter an amount to see how much this hedge would use, and whether it fits.`,
+    idleBook: (ch: string) => `These are the lines of every counterparty on ${ch} as they stand. Enter an amount to see whether the order fits each of them.`,
     fits: 'Fits',
     blocked: 'Blocked',
     adds: (psr: string, sr: string | null, g: string) =>
@@ -120,6 +123,8 @@ const T = {
     bookGroup: '成交後才披露對手的場地。打勾代表場地上每個對手都有足夠額度。',
     hasRoom: '，額度足夠',
     noRoom: '，額度不足',
+    idle: (g: string) => `下面是 ${g}現在的額度。輸入金額，看這筆對沖要用多少、放不放得下。`,
+    idleBook: (ch: string) => `下面是 ${ch} 上每個對手現在的額度。輸入金額，看這張訂單在每個對手那裡放不放得下。`,
     fits: '額度足夠',
     blocked: '額度不足',
     adds: (psr: string, sr: string | null, g: string) => `${g}的交割前風險增加 ${psr} 百萬美元${sr ? `，結算風險每日最多增加 ${sr} 百萬美元` : ''}。`,
@@ -230,6 +235,9 @@ interface GroupRows {
   sr: LineRow[];
 }
 
+/** One counterparty an order on a book could fill with: its lines, and the check once the ticket has an amount. */
+type BookView = GroupRows & { group: Group; check?: CheckResult };
+
 function lineRows(keys: string[], label: (k: string) => string, line: (i: number) => number, b: BoardRow[], c?: CheckRow[]): LineRow[] {
   return keys.map((key, i) => {
     const br = b.find((r) => r.key === key);
@@ -257,10 +265,19 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
   const [ticket, setTicket] = useState(DEFAULT_TICKET);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const trades = candidates(ctx, state, ticket);
+  // With no amount there is no hedge to check yet. A ticket of one unit still says what else is wrong with it,
+  // who could fill it and which pillars it would count in; it is never checked or sent.
+  const blank = !(ticket.amount > 0);
+  const trades = candidates(ctx, state, blank ? { ...ticket, amount: 1 } : ticket);
+  const idle = blank && !('error' in trades);
   // On a book the desk cannot choose the counterparty: the order is checked against everyone who could fill it.
   const book = bookOf(state, ticket);
-  const checks = 'error' in trades ? [] : trades.map((x) => checkTrade(ctx, state, x));
+  const checks = 'error' in trades || idle ? [] : trades.map((x) => checkTrade(ctx, state, x));
+  /** Send what is on the ticket, then clear its amount: the lines go back to what is in use and reserved. */
+  const send = (a: Action) => {
+    dispatch(a);
+    setTicket({ ...ticket, amount: 0 });
+  };
   const fits = (to: Partial<Ticket>) => {
     const other = candidates(ctx, state, { ...ticket, ...to });
     return 'error' in other ? null : other.every((x) => checkTrade(ctx, state, x).ok);
@@ -324,8 +341,9 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
             ticket={ticket}
             book={book}
             error={'error' in trades ? trades.error : null}
-            views={checks.map((c) => ({ check: c, ...rowsFor(c.group, c) }))}
-            dispatch={dispatch}
+            pillar={'error' in trades ? -1 : valueTrade(ctx, trades[0]).pillar}
+            views={'error' in trades ? [] : trades.map((x, i) => ({ group: groupOf(state, x.lpId), check: checks[i], ...rowsFor(groupOf(state, x.lpId), checks[i]) }))}
+            send={send}
           />
         ) : (
           <>
@@ -333,11 +351,13 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
               <p className="alert" role="alert">
                 {t.errors[trades.error](PAIRS[ticket.pair].label, largestTicket(ctx, ticket.pair))}
               </p>
+            ) : idle ? (
+              <Idle text={t.idle(groupName)} action={t.send} />
             ) : (
-              <Verdict trade={check.trade} check={check} onSend={() => dispatch({ type: 'SEND', ticket })} />
+              <Verdict trade={check.trade} check={check} onSend={() => send({ type: 'SEND', ticket })} />
             )}
 
-            <LineBars title={t.psr} group={groupName} rows={psr} legend />
+            <LineBars title={t.psr} group={groupName} rows={psr} legend withHedge={!!check} />
             {check && PILLARS[check.risk.pillar] && <p className="quiet pillar-why">{t.pillarWhy(PILLARS[check.risk.pillar])}</p>}
             {sr.length > 0 ? (
               <LineBars title={t.sr} group={groupName} rows={sr} />
@@ -382,7 +402,8 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
   const info = PAIRS[ticket.pair];
   const tenors = ticket.product === 'SWAP' ? SWAP_TENORS : OUTRIGHT_TENORS;
   const pairs = PAIR_IDS.filter((id) => PAIRS[id].deliverable === (ticket.product !== 'NDF'));
-  const auto = buildTrade(ctx, { ...ticket, settlement: 'AUTO' });
+  // How a ticket settles does not depend on its amount, which may still be empty.
+  const auto = buildTrade(ctx, { ...ticket, amount: 1, settlement: 'AUTO' });
   return (
     <div className="ticket">
       <div className="field">
@@ -414,7 +435,7 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
       </label>
       <label className="field field-narrow">
         <span className="label">{t.amount(info.base)}</span>
-        <NumInput label={t.amount(info.base)} value={ticket.amount / M} min={0} onChange={(v) => onChange({ ...ticket, amount: v * M })} />
+        <NumInput blank label={t.amount(info.base)} value={ticket.amount / M} min={0} onChange={(v) => onChange({ ...ticket, amount: v * M })} />
       </label>
       <label className="field field-narrow">
         <span className="label">{t.tenor}</span>
@@ -441,6 +462,20 @@ function TicketRow({ ticket, onChange, ctx }: { ticket: Ticket; onChange: (t: Ti
 }
 
 // ----------------------------------------------------------------- verdict
+/** No amount on the ticket yet: say what the bars below show and what entering one will do. */
+function Idle({ text, action }: { text: string; action?: string }) {
+  return (
+    <div className="verdict-row">
+      <p className="verdict-why">{text}</p>
+      {action && (
+        <button type="button" className="primary" disabled>
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; onSend: () => void }) {
   const lang = useLang();
   const t = T[lang];
@@ -475,12 +510,14 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
   );
 }
 
-/** Of one counterparty's lines, the one this order presses hardest: the worst breach, or else the least room left. */
-function tightest(rows: LineRow[], name: string): LineRow {
-  // `rows` come labelled: a pillar for pre-settlement risk, 'SR' and a date for settlement risk.
-  const over = rows.filter((r) => !r.ok).sort((a, b) => b.after - b.line - (a.after - a.line))[0];
-  const touched = rows.filter((r) => Math.abs(r.hedge) > 0.5).sort((a, b) => a.line - a.after - (b.line - b.after))[0];
-  const r = over ?? touched ?? rows[0];
+/** Of one counterparty's lines, the one an order presses hardest: the worst breach, or else the least room left
+ *  among the lines it adds to. With no amount yet, the least room left among the pillars it would count in. */
+function tightest(v: GroupRows, name: string, srRow: (k: string) => string, pillar: number): LineRow {
+  const rows = [...v.psr, ...v.sr.map((r) => ({ ...r, label: srRow(r.label) }))];
+  const room = (a: LineRow, b: LineRow) => a.line - a.after - (b.line - b.after);
+  const over = rows.filter((r) => !r.ok).sort(room)[0];
+  const touched = rows.filter((r) => Math.abs(r.hedge) > 0.5).sort(room)[0];
+  const r = over ?? touched ?? v.psr.slice(0, pillar + 1).sort(room)[0] ?? v.psr[0];
   return { ...r, key: name, label: `${name} · ${r.label}` };
 }
 
@@ -492,12 +529,13 @@ function BookPanel(p: {
   ticket: Ticket;
   book: Channel;
   error: TicketError | null;
-  views: ({ check: CheckResult } & GroupRows)[];
-  dispatch: Dispatch<Action>;
+  pillar: number;
+  views: BookView[];
+  send: (a: Action) => void;
 }) {
   const lang = useLang();
   const t = T[lang];
-  const { ctx, state, ticket, views } = p;
+  const { ctx, state, ticket } = p;
   if (p.error) {
     return (
       <p className="alert" role="alert">
@@ -507,8 +545,20 @@ function BookPanel(p: {
   }
   const channel = CHANNELS[p.book].label;
   const checking = checksBook(state, p.book);
-  const name = (c: CheckResult) => partyName(c.group.name, lang);
-  const short = views.filter((v) => !v.check.ok).map((v) => name(v.check)).join(lang === 'zh' ? '、' : ', ');
+  const name = (g: Group) => partyName(g.name, lang);
+  const views = p.views.filter((v): v is BookView & { check: CheckResult } => v.check !== undefined);
+  const bars = (
+    <LineBars title={t.eachTightest} group={channel} rows={p.views.map((v) => tightest(v, name(v.group), t.srRow, p.pillar))} legend withHedge={views.length > 0} wide />
+  );
+  if (views.length === 0) {
+    return (
+      <>
+        <Idle text={t.idleBook(channel)} action={checking ? t.place : undefined} />
+        {bars}
+      </>
+    );
+  }
+  const short = views.filter((v) => !v.check.ok).map((v) => name(v.group)).join(lang === 'zh' ? '、' : ', ');
   const ok = short === '';
   const largest = ok || !checking ? 0 : largestThatFits(ctx, state, ticket);
   const order = views[0].check.trade;
@@ -529,29 +579,29 @@ function BookPanel(p: {
           <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
         </div>
         {checking ? (
-          <button type="button" className="primary" disabled={!ok} onClick={() => p.dispatch({ type: 'SEND', ticket })}>
+          <button type="button" className="primary" disabled={!ok} onClick={() => p.send({ type: 'SEND', ticket })}>
             {t.place}
           </button>
         ) : (
           <div className="verdict-actions">
             {views.map((v) => (
-              <button key={v.check.trade.lpId} type="button" className="secondary" onClick={() => p.dispatch({ type: 'BOOK_FILL', ticket, lpId: v.check.trade.lpId })}>
-                {t.fillsWith(name(v.check))}
+              <button key={v.check.trade.lpId} type="button" className="secondary" onClick={() => p.send({ type: 'BOOK_FILL', ticket, lpId: v.check.trade.lpId })}>
+                {t.fillsWith(name(v.group))}
               </button>
             ))}
           </div>
         )}
       </div>
 
-      <LineBars title={t.eachTightest} group={channel} rows={views.map((v) => tightest([...v.psr, ...v.sr.map((r) => ({ ...r, label: t.srRow(r.label) }))], name(v.check)))} legend wide />
+      {bars}
 
       <details className="more">
-        <summary>{t.workingsFor(name(focus.check))}</summary>
-        <Workings ctx={ctx} trade={focus.check.trade} risk={focus.check.risk} measured={focus.check.after} group={focus.check.group} isNew />
+        <summary>{t.workingsFor(name(focus.group))}</summary>
+        <Workings ctx={ctx} trade={focus.check.trade} risk={focus.check.risk} measured={focus.check.after} group={focus.group} isNew />
       </details>
       {views.map((v) => (
-        <details key={v.check.group.id} className="more">
-          <summary>{t.figures(name(v.check))}</summary>
+        <details key={v.group.id} className="more">
+          <summary>{t.figures(name(v.group))}</summary>
           <FiguresTable psr={v.psr} sr={v.sr} />
         </details>
       ))}
@@ -560,7 +610,7 @@ function BookPanel(p: {
 }
 
 // ------------------------------------------------------------ credit lines
-function LineBars({ title, group, rows, legend, wide }: { title: string; group: string; rows: LineRow[]; legend?: boolean; wide?: boolean }) {
+function LineBars({ title, group, rows, legend, withHedge, wide }: { title: string; group: string; rows: LineRow[]; legend?: boolean; withHedge?: boolean; wide?: boolean }) {
   const t = T[useLang()];
   return (
     <div className={wide ? 'lines lines-wide' : 'lines'}>
@@ -571,7 +621,7 @@ function LineBars({ title, group, rows, legend, wide }: { title: string; group: 
             · {group} · {t.unit}
           </span>
         </h2>
-        {legend && <BarLegend withHedge />}
+        {legend && <BarLegend withHedge={withHedge} />}
       </div>
       {rows.map((r) => (
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>

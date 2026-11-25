@@ -22,7 +22,7 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 
 | View | What it is for |
 | --- | --- |
-| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and the switches for a channel that discloses after the trade open on demand |
+| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. The ticket opens with no amount, so the bars first show only what is in use and reserved; the hedge on the ticket appears once an amount is entered, and the amount clears when the hedge is sent. Workings, figures, market data, credit lines and the switches for a channel that discloses after the trade open on demand |
 | Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
 | Formulae | The method on one page, then one swap, and one order on a book, followed step by step |
 | Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, a short flow for each way a hedge is checked, and the open questions |
