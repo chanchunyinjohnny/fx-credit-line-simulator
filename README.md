@@ -23,8 +23,8 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 | --- | --- |
 | Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and channel limits open on demand |
 | Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
-| Formulae | The method on one page, one swap and one channel limit followed step by step, and the comparison with QuantLib |
-| Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, the two kinds of channel, and the open questions |
+| Formulae | The method on one page, then one swap and one channel limit followed step by step |
+| Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, a short flow for each way a hedge is checked, and the open questions |
 
 Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time, and lists every assumption the program makes with its status: verified against a public source, a simplification, invented, or still to be confirmed.
 

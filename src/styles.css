@@ -178,9 +178,13 @@ body { margin: 0; background: #fafaf7; }
 .method-row h3 { margin: 0; }
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 26px 0 0; }
 .grid-two h2 { margin-top: 0; }
+.grid-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; margin: 18px 0 20px; }
+.grid-three h3 { margin: 0 0 4px; }
+.grid-three .quiet { margin: 0 0 12px; min-height: 2.9em; }
 /* A diagram keeps its drawn size; on a narrow screen it scrolls inside its own frame. */
 .diagram { width: 100%; overflow-x: auto; }
 .diagram svg { display: block; width: 100%; min-width: 448px; height: auto; }
+.diagram-small svg { min-width: 0; max-width: 340px; }
 @media print {
   .diagram { overflow-x: visible; }
   .diagram svg { min-width: 0; }
@@ -197,6 +201,8 @@ body { margin: 0; background: #fafaf7; }
   .lp-row { flex-direction: column; gap: 8px; }
   .line-row { grid-template-columns: 70px minmax(60px, 1fr) 118px; gap: 10px; }
   .stats, .grid-two { grid-template-columns: 1fr; gap: 0; }
+  .grid-three { grid-template-columns: 1fr; gap: 22px; }
+  .grid-three .quiet { min-height: 0; }
   .stat + .stat { border-left: 0; border-top: 1px solid var(--rule); padding-left: 0; }
   .grid-two section + section { margin-top: 26px; }
   .method-row { grid-template-columns: 1fr; gap: 8px; }

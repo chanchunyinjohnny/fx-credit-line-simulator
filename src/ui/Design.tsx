@@ -1,5 +1,7 @@
-import { FlowDiagram } from './FlowDiagram';
+import { ChannelFlow, FlowDiagram, flowTitle, type FlowKind } from './FlowDiagram';
 import { useLang } from './i18n';
+
+const KINDS: FlowKind[] = ['send', 'callback', 'channel'];
 
 const T = {
   en: {
@@ -19,12 +21,12 @@ const T = {
     ],
     kinds: 'Two kinds of channel',
     kindsLead: 'What decides the design is who can say no before the trade is final.',
-    kindsHead: ['', 'The desk checks', 'The channel checks'],
-    kindsRows: [
-      ['Counterparty known', 'Before the trade is final', 'From the fill'],
-      ['What the desk does', 'Check and reserve, then fill or release', 'Hold room for the channel limit, then book each fill'],
-      ['Where', 'Request for quote or stream (360T, FXGO). An order book that asks after the match', 'An order book that fills on limits it holds (EBS Market)'],
-    ],
+    kindsWhere: {
+      send: 'Request for quote or stream: 360T, FXGO.',
+      callback: 'An order book that asks before the trade is final.',
+      channel: 'An order book that fills on limits it holds: EBS Market.',
+    },
+    legend: 'The shaded step is where the desk decides on the credit line.',
     ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + held for channels + headroom.',
     scope: 'Scope: FX swap, forward and NDF. A channel reached through a prime broker or clearing house faces that one counterparty, so it has one line of its own.',
     confirmed: 'Confirmed',
@@ -60,12 +62,12 @@ const T = {
     ],
     kinds: '兩類渠道',
     kindsLead: '設計只取決於一件事：成交前誰可以說「不」。',
-    kindsHead: ['', '交易台檢查', '場地檢查'],
-    kindsRows: [
-      ['何時知道對手', '成交前', '成交回報'],
-      ['交易台做什麼', '檢查並預佔，然後成交或釋放', '按場地限額預留額度，成交後逐筆記帳'],
-      ['例子', '詢價和持續報價（360T、FXGO）；撮合後會來問的訂單簿', '按自己持有的限額成交的訂單簿（EBS Market）'],
-    ],
+    kindsWhere: {
+      send: '詢價和持續報價：360T、FXGO。',
+      callback: '成交前會來問的訂單簿。',
+      channel: '按自己持有的限額成交的訂單簿：EBS Market。',
+    },
+    legend: '有底色的一步，是交易台決定額度夠不夠的地方。',
     ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 場地切片 + 可用額度。',
     scope: '適用範圍：外匯掉期、遠期和 NDF。經主經紀商或清算所交易的渠道，對手只有那一家，另有一條自己的額度。',
     confirmed: '已確認',
@@ -87,7 +89,8 @@ const T = {
 } as const;
 
 export function Design() {
-  const t = T[useLang()];
+  const lang = useLang();
+  const t = T[lang];
   return (
     <div className="prose">
       <p className="lead">{t.lead}</p>
@@ -125,26 +128,16 @@ export function Design() {
 
       <h2>{t.kinds}</h2>
       <p>{t.kindsLead}</p>
-      <div className="table-wrap">
-        <table className="table text-table">
-          <thead>
-            <tr>
-              {t.kindsHead.map((h) => (
-                <th key={h}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {t.kindsRows.map(([k, desk, channel]) => (
-              <tr key={k}>
-                <td>{k}</td>
-                <td>{desk}</td>
-                <td>{channel}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid-three">
+        {KINDS.map((kind) => (
+          <section key={kind}>
+            <h3>{flowTitle(lang, kind)}</h3>
+            <p className="quiet">{t.kindsWhere[kind]}</p>
+            <ChannelFlow kind={kind} />
+          </section>
+        ))}
       </div>
+      <p className="quiet">{t.legend}</p>
       <p>{t.ledger}</p>
       <p className="quiet">{t.scope}</p>
 

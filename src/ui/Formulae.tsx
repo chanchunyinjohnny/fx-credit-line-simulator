@@ -1,20 +1,16 @@
 import { useMemo, type ReactNode } from 'react';
-import golden from '../data/golden.json';
-import { spotDate, tenorDate, tomDate } from '../engine/calendar';
 import { defaultState } from '../engine/defaults';
 import { CHANNELS } from '../engine/channels';
 import { board, channelFill, checkTrade, maxChannelLimit } from '../engine/lines';
-import { dfUsd } from '../engine/market';
-import { makeCtx, srByDate, valueLeg } from '../engine/risk';
+import { makeCtx, srByDate } from '../engine/risk';
 import { buildTrade, reducer } from '../engine/state';
-import type { PairId, Ticket, Trade } from '../engine/types';
+import type { Ticket, Trade } from '../engine/types';
 import { Calc } from './bits';
 import { amt, day, mio, partyName, rate, signedAmt } from './format';
 import { useLang } from './i18n';
 import { Workings } from './Workings';
 
 const M = 1_000_000;
-const FAR_TENORS = ['SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'] as const;
 const EXAMPLE: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 20 * M, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
 const LATER_SPOT = 1.1767; // 1% above the starting 1.1650
 const CHANNEL_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 20 * M, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' };
@@ -83,23 +79,14 @@ const T = {
     later: (r: string) => `A week later, spot up 1% to ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
-    checked: 'Checked against QuantLib',
-    checkedText: (v: string, n: string, ok: boolean) =>
-      `The app calculates everything itself. As a check, ${v} computed ${n} reference values and the app ${ok ? 'reproduces all of them' : 'does not reproduce all of them'}, recomputed in your browser just now.`,
-    head: ['Compared', 'Cases', 'Largest difference'],
-    compared: ['Value dates', 'Outright rates', 'Discount factors', 'Market values'],
-    none: 'none',
-    dates: (n: number) => `${n} dates`,
-    cent: 'under USD 0.01',
     more: 'Assumptions, limits and sources',
     notes: [
-      'Pre-settlement and settlement risk are credit rules, not pricing. They are tested against hand-worked cases, not a library.',
       'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
       'Net-to-gross ratio and add-on netting: Basel II framework, Annex 4. With no positive market value the ratio is taken as 1, as the US swap margin rule does for the same formula.',
       'Settlement risk is what is due to be received, counted on the value date only. This is the common convention for a daily settlement limit: 52% of institutions in the 2006 CPSS survey measured it this way. Basel (2013) and the HKMA (TA-2) define the exposure as running from when our payment can no longer be cancelled until receipt is confirmed. That took 26 hours on average in the survey, so one day can understate it.',
       'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a payment due on the day it is dealt always counts in full. The other leg can still go through CLS.',
       'The implied interest rate uses Actual/365 for GBP and Actual/360 for USD, EUR, JPY and CNH. Actual/365 for TWD is not confirmed.',
-      'QuantLib has no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
+      'The holiday tables have no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
       'EBS Market matches orders only where both sides hold credit for each other on the platform, and names the counterparty after the trade (EBS Dealing Rules, EBS Market appendix; EBS disclosure cover sheet). Sizing the room held by one add-on, and a single order type per channel, are simplifications of this app.',
       'Every assumption is listed in the design notes in the source repository.',
     ],
@@ -167,23 +154,14 @@ const T = {
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
       `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
-    checked: '與 QuantLib 核對',
-    checkedText: (v: string, n: string, ok: boolean) =>
-      `所有數字都由本程式自行計算。作為核對，${v} 另外算出 ${n} 個參考值，本程式${ok ? '全部重現' : '未能全部重現'}（剛在你的瀏覽器重新計算）。`,
-    head: ['核對項目', '個數', '最大差異'],
-    compared: ['交割日', '遠期匯率', '折現因子', '市值'],
-    none: '無',
-    dates: (n: number) => `${n} 個日期`,
-    cent: '少於 USD 0.01',
     more: '假設、限制與資料來源',
     notes: [
-      '交割前風險和結算風險屬信貸規則，不是定價，因此以手算個案測試，而非程式庫。',
       '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
       '淨額對總額比率（NGR）與附加金額的淨額計算：巴塞爾協定二，附件四。沒有任何正市值時 NGR 取 1，與美國掉期保證金規則對同一公式的處理相同。',
       '結算風險是我方應收的金額，只計在交割日當天。這是每日結算額度的行業慣例：2006 年 CPSS 調查中 52% 的機構這樣計。巴塞爾（2013）和金管局（TA-2）的定義是由我方付款不能撤回開始，計到確認收款為止。調查中這段時間平均 26 小時，所以只計一天可能低估。',
       'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以當日交收的款項一律計全額。另一邊仍可經 CLS。',
       '隱含利率的計息日數：GBP 用 Actual/365，USD、EUR、JPY、CNH 用 Actual/360；TWD 用 Actual/365，未經證實。',
-      'QuantLib 沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
+      '假期表沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
       'EBS Market 只在雙方於平台上互有額度時才撮合，成交後才披露對手（EBS Dealing Rules 的 EBS Market 附錄；EBS 的平台披露表）。以單一附加因子計算場地切片，以及每個場地只接受一種訂單，是本程式的簡化。',
       '所有假設都列在原始碼倉庫的設計說明裡。',
     ],
@@ -227,32 +205,6 @@ function buildChannelExample() {
   return { group: s0.groups[1], channel: CHANNELS[before.a.limit.channel].label, before, fill, after, tight, max, next };
 }
 
-/** Recompute every reference case with the app's engine and measure the gap to QuantLib. */
-function compareWithQuantLib() {
-  const rows = { dates: { cases: 0, worst: 0 }, rates: { cases: 0, worst: 0 }, dfs: { cases: 0, worst: 0 }, legs: { cases: 0, worst: 0 } };
-  for (const row of golden.dates as Record<string, string>[]) {
-    const pair = row.pair as PairId;
-    const spot = spotDate(row.tradeDate, pair);
-    const mine: Record<string, string> = { tom: tomDate(row.tradeDate, pair), spot };
-    for (const t of FAR_TENORS) mine[t] = tenorDate(spot, t, pair);
-    for (const key of Object.keys(mine)) {
-      rows.dates.cases++;
-      if (mine[key] !== row[key]) rows.dates.worst++;
-    }
-  }
-  for (const sc of golden.scenarios) {
-    const ctx = makeCtx({ ...defaultState(), businessDate: sc.businessDate });
-    const track = (r: { cases: number; worst: number }, diff: number) => {
-      r.cases++;
-      r.worst = Math.max(r.worst, Math.abs(diff));
-    };
-    for (const f of sc.forwards) track(rows.rates, ctx.curve(f.pair as PairId).forward(f.date) - f.forward);
-    for (const d of sc.dfs) track(rows.dfs, dfUsd(ctx.market, ctx.t0, d.date) - d.df);
-    for (const leg of sc.legs) track(rows.legs, valueLeg(ctx, leg.pair as PairId, leg).mv - leg.mvUsd);
-  }
-  return { ...rows, version: golden.generatedWith };
-}
-
 function Method({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="method-row">
@@ -266,19 +218,9 @@ export function Formulae() {
   const lang = useLang();
   const t = T[lang];
   const ex = useMemo(buildExample, []);
-  const cmp = useMemo(compareWithQuantLib, []);
   const ch = useMemo(buildChannelExample, []);
   const inUse = (r: { earlier: number; today: number }) => r.earlier + r.today;
   const [near, far] = ex.trade.legs;
-  const total = cmp.dates.cases + cmp.rates.cases + cmp.dfs.cases + cmp.legs.cases;
-  const allMatch = cmp.dates.worst === 0 && cmp.rates.worst < 1e-9 && cmp.dfs.worst < 1e-9 && cmp.legs.worst < 0.01;
-  const gap = (x: number) => (x < 1e-9 ? t.none : x.toExponential(1));
-  const results = [
-    [cmp.dates.cases, cmp.dates.worst === 0 ? t.none : t.dates(cmp.dates.worst)],
-    [cmp.rates.cases, gap(cmp.rates.worst)],
-    [cmp.dfs.cases, gap(cmp.dfs.worst)],
-    [cmp.legs.cases, cmp.legs.worst < 0.01 ? t.cent : `USD ${cmp.legs.worst.toFixed(2)}`],
-  ];
 
   return (
     <div className="prose">
@@ -344,28 +286,6 @@ export function Formulae() {
       <Calc>{t.chRoom(ch.next.psr.key, amt(ch.next.psr.line), amt(inUse(ch.next.psr)), amt(ch.next.psr.allocated), amt(ch.next.psr.headroom))}</Calc>
       <p className="quiet">{t.chWhy}</p>
 
-      <h2>{t.checked}</h2>
-      <p>{t.checkedText(cmp.version, amt(total), allMatch)}</p>
-      <div className="table-wrap">
-        <table className="table compact">
-          <thead>
-            <tr>
-              {t.head.map((h) => (
-                <th key={h}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {results.map(([cases, worst], i) => (
-              <tr key={t.compared[i]}>
-                <td>{t.compared[i]}</td>
-                <td>{cases}</td>
-                <td>{worst}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
       <details className="more">
         <summary>{t.more}</summary>
         <ul>

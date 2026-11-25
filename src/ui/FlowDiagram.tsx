@@ -64,7 +64,7 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
       pick: ['Pick best LP and reserve', 'checked again, in one step'],
       loop: 'RELEASE, NEXT',
       filled: ['Filled', 'reservation becomes usage'],
-      daily: ['Each day', 'revalue what is still open'],
+      daily: ['Each day', 'revalue; recompute channel limits'],
     },
   },
   zh: {
@@ -85,7 +85,7 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
       pick: ['選最佳 LP 並預佔額度', '再檢查一次，一步完成'],
       loop: '釋放，下一家',
       filled: ['成交', '預佔轉為已用額度'],
-      daily: ['每日', '重估未到期的對沖'],
+      daily: ['每日', '重估未到期的對沖；重算場地限額'],
     },
   },
 };
@@ -204,6 +204,121 @@ export function FlowDiagram({ variant }: { variant: 'draft' | 'proposed' }) {
             </text>
           </>
         )}
+      </svg>
+    </div>
+  );
+}
+
+// Three short flows, one for each way a hedge is checked. They reuse the step
+// box above; the accent marks the step where the desk decides on the credit line.
+export type FlowKind = 'send' | 'callback' | 'channel';
+interface FlowCopy {
+  title: string;
+  desc: string;
+  steps: [string, string][];
+  focal: number;
+}
+
+const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
+  en: {
+    send: {
+      title: 'The desk checks before it sends',
+      desc: 'Flow: an initial check, then the picked LP is checked and its room reserved in one step, the hedge is sent, and a fill turns the reservation into usage while a rejection releases it.',
+      steps: [
+        ['Initial check', 'ask only LPs that fit'],
+        ['Pick LP: check and reserve', 'in one step'],
+        ['Send', 'the LP fills or rejects'],
+        ['Fill: reserved becomes used', 'reject: release it'],
+      ],
+      focal: 1,
+    },
+    callback: {
+      title: 'The desk checks after a match',
+      desc: 'Flow: an order rests on the channel, the channel matches it and asks the desk, the desk checks and reserves and answers in time, and a fill turns the reservation into usage while a cancel releases it.',
+      steps: [
+        ['Order rests on the channel', 'counterparty not yet known'],
+        ['Channel matches, then asks', 'names counterparty and amount'],
+        ['Check and reserve', 'answer within the time limit'],
+        ['Fill: reserved becomes used', 'cancel: release it'],
+      ],
+      focal: 2,
+    },
+    channel: {
+      title: 'The channel checks',
+      desc: 'Flow: each morning the desk sets the channel limit from the room the line has left and holds that room in full, the channel matches and fills without asking, and each fill report is booked as usage while the held room shrinks.',
+      steps: [
+        ['Each morning: set the limit', 'from the room the line has left'],
+        ['Hold that room on the line', 'in full, as if already used'],
+        ['Channel matches and fills', 'without asking the desk'],
+        ['Fill report: book as usage', 'the held room shrinks'],
+      ],
+      focal: 0,
+    },
+  },
+  zh: {
+    send: {
+      title: '交易台檢查，送出前',
+      desc: '流程：先做初步檢查；選定 LP 後檢查並預佔，一步完成；送出；成交後預佔轉為已用，被拒則釋放。',
+      steps: [
+        ['初步檢查', '只向放得進的 LP 詢價'],
+        ['選定 LP：檢查並預佔', '一步完成'],
+        ['送出', 'LP 成交或拒絕'],
+        ['成交：預佔轉為已用', '拒絕：釋放預佔'],
+      ],
+      focal: 1,
+    },
+    callback: {
+      title: '交易台檢查，撮合後',
+      desc: '流程：在場地掛單；場地撮合後來問交易台；交易台檢查並預佔，在時限內回覆；成交後預佔轉為已用，取消則釋放。',
+      steps: [
+        ['在場地掛單', '這時還不知道對手'],
+        ['場地撮合，來問交易台', '帶對手、金額、日期'],
+        ['檢查並預佔', '在時限內回覆通過或拒絕'],
+        ['成交：預佔轉為已用', '取消：釋放預佔'],
+      ],
+      focal: 2,
+    },
+    channel: {
+      title: '場地檢查',
+      desc: '流程：每朝交易台按額度的剩餘空間計算場地限額，並把整份記為場地切片；場地撮合並成交，不問交易台；成交回報記入已用，場地切片相應減少。',
+      steps: [
+        ['每朝：計算場地限額', '按額度的剩餘空間，推送到場地'],
+        ['整份記為場地切片', '當作已佔用'],
+        ['場地撮合並成交', '不問交易台'],
+        ['成交回報：記入已用', '場地切片相應減少'],
+      ],
+      focal: 0,
+    },
+  },
+};
+
+export const flowTitle = (lang: Lang, kind: FlowKind) => FLOWS[lang][kind].title;
+
+export function ChannelFlow({ kind }: { kind: FlowKind }) {
+  const lang = useLang();
+  const c = FLOWS[lang][kind];
+  const id = `flow-${kind}`;
+  const GAP = 32;
+  const TOP = 8;
+  const y = (i: number) => TOP + i * (H + GAP);
+  const height = y(c.steps.length - 1) + H + TOP;
+  return (
+    <div className="diagram diagram-small">
+      <svg viewBox={`${X - 8} 0 ${W + 16} ${height}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
+        <title id={`${id}-title`}>{c.title}</title>
+        <desc id={`${id}-desc`}>{c.desc}</desc>
+        <defs>
+          <marker id={`${id}-arrow`} markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill={MUTED} />
+          </marker>
+        </defs>
+        <rect x={X - 8} width={W + 16} height={height} fill={PAPER} />
+        {c.steps.slice(1).map((_, i) => (
+          <line key={i} x1={CX} y1={y(i) + H} x2={CX} y2={y(i + 1)} stroke={MUTED} strokeWidth={1.2} markerEnd={`url(#${id}-arrow)`} />
+        ))}
+        {c.steps.map(([name, sub], i) => (
+          <StepBox key={name} y={y(i)} name={name} sub={sub} focal={i === c.focal} />
+        ))}
       </svg>
     </div>
   );
