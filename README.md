@@ -14,16 +14,17 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Time pillars.** Pre-settlement lines are set per maturity pillar. A hedge counts in the pillar it matures in and in every shorter one.
 - **Check, reserve, fill.** A hedge is checked before it goes out. Sending it reserves the room; a fill turns the reservation into utilisation; a rejection releases it. Without the reservation, two hedges in flight could both pass and both fill.
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
+- **A channel that checks credit itself.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade. The desk sets a limit on the channel and holds room on the credit line for all the channel could still fill. A fill moves from that room to utilisation, on the same line as every other hedge. The limit is recomputed each morning.
 - **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
 ## The four views
 
 | View | What it is for |
 | --- | --- |
-| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data and credit lines open on demand |
+| Simulator | A ticket, the LPs marked by whether they have room, one verdict, and bars showing each credit line. Workings, figures, market data, credit lines and channel limits open on demand |
 | Lines | Every banking group's lines today, pillar by pillar, and settlement risk date by date |
-| Formulae | The method on one page, one swap followed step by step, and the comparison with QuantLib |
-| Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, and the open questions |
+| Formulae | The method on one page, one swap and one channel limit followed step by step, and the comparison with QuantLib |
+| Design | Flowcharts of the hedging flow as first drawn and as proposed, what the review found, the two kinds of channel, and the open questions |
 
 Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design was derived, one question at a time, and lists every assumption the program makes with its status: verified against a public source, a simplification, invented, or still to be confirmed.
 
@@ -37,7 +38,8 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | Pre-settlement risk, no netting | sum of each hedge's exposure, per pillar |
 | Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
 | Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs. A payment due on the day it is dealt always counts in full |
-| Headroom | credit line − earlier days' hedges − today's fills − reservations |
+| Headroom | credit line − earlier days' hedges − today's fills − reservations − room held for channels |
+| Room held for a channel | channel limit left today × add-on % of the longest order sent there, on that pillar and every shorter one |
 
 ## How the numbers are checked
 
@@ -57,7 +59,7 @@ Pre-settlement and settlement risk are credit policy rather than pricing, so no 
 ```sh
 npm install
 npm run dev      # local server
-npm test         # 31 tests
+npm test         # 37 tests
 npm run build    # static site in dist/
 npm run oracle   # regenerate the QuantLib reference values (needs uv)
 ```
@@ -66,7 +68,7 @@ No server and no accounts: state is kept in the browser's local storage, and Res
 
 ## Scope and limits
 
-- Request-based trading only (request for quote or stream), where the counterparty is known before execution. Anonymous order books are out of scope: there the venue screens credit from limits it holds.
+- Two kinds of channel: one where the desk knows the counterparty and checks before the trade is final (request for quote or stream), and one that fills on limits it holds (an order book, here taking a single order type, a 1M USD/TWD NDF). An order book that asks the desk after a match uses the first flow and is not modelled separately. Channels reached through a prime broker or clearing house are out of scope.
 - One LP per hedge, up to USD 50 mio. Split orders are not modelled.
 - Standard tenors from overnight to one year. Forward-forward swaps and NDF fixing dates are not modelled.
 - QuantLib 1.44 carries no lunar holidays for Hong Kong or Taiwan after 2026, so USD/CNH and USD/TWD value dates in 2027 ignore them.
@@ -77,6 +79,7 @@ No server and no accounts: state is kept in the browser's local storage, and Res
 - Basel Committee on Banking Supervision, Basel II framework, Annex 4: the current exposure method and the net-to-gross ratio.
 - Basel Committee on Banking Supervision, *Supervisory guidance for managing risks associated with the settlement of foreign exchange transactions* (2013).
 - CLS Group: payment-versus-payment settlement and eligible currencies.
+- EBS Dealing Rules (EBS Market appendix) and CME's EBS credit overview: credit screened at the match from limits held on the platform, the counterparty named after the trade, limits reset each trading day.
 - Global Foreign Exchange Committee, FX Global Code.
 
 Designed and built by Chan Chun Yin Johnny.

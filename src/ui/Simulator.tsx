@@ -1,9 +1,10 @@
 import { useMemo, useState, type Dispatch } from 'react';
 import { OUTRIGHT_TENORS, PAIRS, PAIR_IDS, PILLARS, SWAP_TENORS } from '../engine/calendar';
-import { board, checkTrade, groupOf, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
+import { CHANNELS } from '../engine/channels';
+import { board, channelFill, checkTrade, groupOf, type BoardRow, type ChannelFill, type CheckResult, type CheckRow } from '../engine/lines';
 import { makeCtx, valueTrade, type Ctx } from '../engine/risk';
-import { buildTrade, type Action, type TicketError } from '../engine/state';
-import type { AppState, Group, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
+import { buildFor, buildTrade, channelOf, type Action, type TicketError } from '../engine/state';
+import type { AppState, Group, Lp, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
 import { NumInput, Status } from './bits';
 import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, partyName, rate, shortDay, signedMio } from './format';
 import { useLang, type Lang } from './i18n';
@@ -25,7 +26,9 @@ const T = {
     settlement: 'Settlement',
     standard: (s: string) => `Standard${s ? `: ${s}` : ''}`,
     sendTo: 'Send to',
+    matchedOn: 'Or matched on',
     lpGroup: 'Liquidity provider. A tick means it has room for this hedge.',
+    channelGroup: 'Counterparty on a channel that checks credit itself. A tick means its limit covers this order.',
     hasRoom: ', has room',
     noRoom: ', no room',
     fits: 'Fits',
@@ -35,6 +38,13 @@ const T = {
     psrOver: (k: string, a: string, l: string) => `Pre-settlement risk at ${k} would reach ${a} against a line of ${l}.`,
     srOver: (d: string, a: string, l: string) => `Settlement risk on ${d} would reach ${a} against a line of ${l}.`,
     onlyReservation: ' It would fit without the hedge in flight: the reservation is what stops both from filling.',
+    onlyAllocation: ' It would fit without the room held for a channel. Lower that channel limit to free it.',
+    chFull: 'The channel fills it',
+    chPart: (x: string) => `The channel fills only USD ${x} mio`,
+    chNone: 'The channel does not fill it',
+    chWhy: (ch: string, g: string, left: string) => `${ch} checks credit at the match and does not ask the desk. Its limit with ${g} has USD ${left} mio left today.`,
+    chMoves: (x: string, g: string) => ` USD ${x} mio moves from room held for the channel to in use. What ${g}'s lines carry does not change.`,
+    chFill: 'Channel fills',
     at: (dates: string, rates: string) => `${dates} at ${rates}`,
     send: 'Send and reserve',
     psr: 'Pre-settlement risk',
@@ -47,7 +57,7 @@ const T = {
     viaCash: 'An NDF pays one net amount.',
     workings: 'Workings: how each number is calculated',
     figures: (g: string) => `Figures: where ${g}'s lines stand today`,
-    figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'This hedge', 'Headroom after'],
+    figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'Held for a channel', 'This hedge', 'Headroom after'],
     psrRow: (k: string) => `PSR ${k}`,
     srRow: (k: string) => `SR ${k}`,
     sent: 'Sent hedges',
@@ -70,6 +80,12 @@ const T = {
     payNet: 'Payment netting',
     addOn: 'Add-on, %',
     offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
+    limits: 'Channel limits: room handed to a channel that checks credit itself',
+    limitsHint:
+      'The desk sets a limit on the channel and holds the same room on the credit line. It can raise a limit only while the line has room, and cannot lower it below what the channel has filled today. The channel starts counting again each morning.',
+    limitsHead: ['Channel and group', 'Limit today', 'Filled today', 'Left', 'Held on the credit line'],
+    limitFor: (ch: string, g: string) => `${ch} limit with ${g}`,
+    heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}, on ${pillar} and shorter`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
       NDF_ONLY: (p: string) => `${p} trades as an NDF only.`,
@@ -78,6 +94,7 @@ const T = {
       TOO_LARGE: () => 'This flow covers hedges up to USD 50 mio with one LP. Enter a larger order as several hedges.',
       NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
+      CHANNEL_ORDER: () => 'This channel takes one order here: USD/TWD NDF, 1M.',
     } as Record<TicketError, (pair: string) => string>,
   },
   zh: {
@@ -89,7 +106,9 @@ const T = {
     settlement: '結算方式',
     standard: (s: string) => `預設${s ? `：${s}` : ''}`,
     sendTo: '送往',
+    matchedOn: '或在場地撮合',
     lpGroup: 'LP。打勾代表有足夠額度做這筆對沖。',
+    channelGroup: '自行檢查額度的場地上的對手。打勾代表場地限額足夠成交整張訂單。',
     hasRoom: '，額度足夠',
     noRoom: '，額度不足',
     fits: '額度足夠',
@@ -98,6 +117,13 @@ const T = {
     psrOver: (k: string, a: string, l: string) => `${k} 期限檔的交割前風險將達 ${a}，額度只有 ${l}。`,
     srOver: (d: string, a: string, l: string) => `${d} 的結算風險將達 ${a}，額度只有 ${l}。`,
     onlyReservation: '若沒有在途的那一筆，這筆本來放得進：正是預佔擋住了兩筆同時成交。',
+    onlyAllocation: '若沒有場地切片，這筆本來放得進。調低場地限額就能騰出額度。',
+    chFull: '場地會成交',
+    chPart: (x: string) => `場地只成交 ${x} 百萬美元`,
+    chNone: '場地不會成交',
+    chWhy: (ch: string, g: string, left: string) => `${ch} 在撮合時自己檢查額度，不會問交易台。它對 ${g}的限額今日尚餘 ${left} 百萬美元。`,
+    chMoves: (x: string, g: string) => `${x} 百萬美元由場地切片轉為已用。${g}的額度佔用總數不變。`,
+    chFill: '場地成交',
     at: (dates: string, rates: string) => `${dates}，匯率 ${rates}`,
     send: '送出並預佔額度',
     psr: '交割前風險',
@@ -110,7 +136,7 @@ const T = {
     viaCash: 'NDF 只支付一筆差額。',
     workings: '計算過程：每個數字怎樣算出來',
     figures: (g: string) => `數字明細：${g}今日的額度使用情況`,
-    figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '本筆', '交易後可用額度'],
+    figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '場地切片', '本筆', '交易後可用額度'],
     psrRow: (k: string) => `交割前 ${k}`,
     srRow: (k: string) => `結算 ${k}`,
     sent: '已送出的對沖',
@@ -133,6 +159,11 @@ const T = {
     payNet: '支付淨額結算',
     addOn: '附加因子 %',
     offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
+    limits: '場地限額：交給自行檢查額度的場地的份額',
+    limitsHint: '交易台在場地設定限額，並在授信額度上預留同等份額。額度有空間才可調高；不可調低於場地今日已成交的金額。場地每朝重新計數。',
+    limitsHead: ['場地和集團', '今日限額', '今日已成交', '尚餘', '授信額度上預留'],
+    limitFor: (ch: string, g: string) => `${ch} 對 ${g}的限額`,
+    heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}，佔 ${pillar} 及更短的期限檔`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,
       NDF_ONLY: (p: string) => `${p} 只能做 NDF。`,
@@ -141,6 +172,7 @@ const T = {
       TOO_LARGE: () => '本流程只涵蓋單一 LP、5,000 萬美元以內的對沖。較大的單請分成幾筆輸入。',
       NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
+      CHANNEL_ORDER: () => '這個場地在本程式只接受一種訂單：USD/TWD NDF，1M。',
     } as Record<TicketError, (pair: string) => string>,
   },
 };
@@ -153,7 +185,7 @@ function withProduct(t: Ticket, product: Product): Ticket {
 
 const lpLabel = (s: AppState, lpId: string, lang: Lang) => {
   const lp = s.lps.find((l) => l.id === lpId)!;
-  return `${partyName(lp.name, lang)} · ${lp.channel}`;
+  return `${partyName(lp.name, lang)} · ${CHANNELS[lp.channel].label}`;
 };
 
 /** One credit line as the screen shows it: what is in use, what this hedge adds, what is left. */
@@ -164,6 +196,7 @@ interface LineRow {
   board?: BoardRow; // absent for a date only this hedge touches
   used: number; // filled hedges
   reserved: number; // hedges in flight
+  allocated: number; // held for channels, once this ticket is counted
   hedge: number; // this ticket
   after: number;
   ok: boolean;
@@ -182,7 +215,8 @@ function lineRows(keys: string[], label: (k: string) => string, line: (i: number
       board: br,
       used: (br?.earlier ?? 0) + (br?.today ?? 0),
       reserved: br?.reserved ?? 0,
-      hedge: after - before,
+      allocated: cr ? cr.held : (br?.allocated ?? 0),
+      hedge: cr ? cr.hedge : 0,
       after,
       ok: cr ? cr.ok : after <= line(i) + 0.5,
     };
@@ -196,20 +230,44 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
   const [ticket, setTicket] = useState(DEFAULT_TICKET);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const built = buildTrade(ctx, ticket);
-  const trade = 'error' in built ? null : built;
-  const check = trade ? checkTrade(ctx, state, trade) : null;
+  const built = buildFor(ctx, state, ticket);
+  const order = 'error' in built ? null : built;
+  // A channel that checks credit itself fills against its own limit; every other hedge is checked here first.
+  const byChannel = channelOf(state, ticket.lpId).checkedBy === 'CHANNEL';
+  const fill = order && byChannel ? channelFill(ctx, state, order) : null;
+  const check = order && !byChannel ? checkTrade(ctx, state, order) : null;
+  const trade = fill ? fill.trade : order;
   const group = groupOf(state, ticket.lpId);
   const groupName = partyName(group.name, lang);
   const b = board(ctx, state, group.id);
-  const fits = (lpId: string) => {
-    const other = buildTrade(ctx, { ...ticket, lpId });
-    return 'error' in other ? null : checkTrade(ctx, state, other).ok;
+  const fits = (lp: Lp) => {
+    const other = buildFor(ctx, state, { ...ticket, lpId: lp.id });
+    if ('error' in other) return null;
+    if (CHANNELS[lp.channel].checkedBy === 'OMS') return checkTrade(ctx, state, other).ok;
+    const f = channelFill(ctx, state, other);
+    return f.fillUsd >= f.sizeUsd - 0.5;
   };
+  const chips = (lps: Lp[]) =>
+    lps.map((lp) => {
+      const ok = fits(lp);
+      return (
+        <button key={lp.id} type="button" className="chip" aria-pressed={lp.id === ticket.lpId} onClick={() => setTicket({ ...ticket, lpId: lp.id })}>
+          {ok !== null && (
+            <span className={ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
+              {ok ? '✓' : '✕'}
+            </span>
+          )}
+          {lpLabel(state, lp.id, lang)}
+          <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
+        </button>
+      );
+    });
+  const checkedHere = (lp: Lp) => CHANNELS[lp.channel].checkedBy === 'OMS';
 
-  const psr = lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, check?.psr);
-  const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(check?.sr.map((r) => r.key) ?? [])])].sort();
-  const sr = lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, check?.sr);
+  const result = fill ?? check;
+  const psr = lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, result?.psr);
+  const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(result?.sr.map((r) => r.key) ?? [])])].sort();
+  const sr = lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, result?.sr);
 
   return (
     <>
@@ -218,20 +276,13 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
         <div className="lp-row">
           <span className="label">{t.sendTo}</span>
           <div className="chips" role="group" aria-label={t.lpGroup}>
-            {state.lps.map((lp) => {
-              const ok = fits(lp.id);
-              return (
-                <button key={lp.id} type="button" className="chip" aria-pressed={lp.id === ticket.lpId} onClick={() => setTicket({ ...ticket, lpId: lp.id })}>
-                  {ok !== null && (
-                    <span className={ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
-                      {ok ? '✓' : '✕'}
-                    </span>
-                  )}
-                  {partyName(lp.name, lang)} · {lp.channel}
-                  <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
-                </button>
-              );
-            })}
+            {chips(state.lps.filter(checkedHere))}
+          </div>
+        </div>
+        <div className="lp-row">
+          <span className="label">{t.matchedOn}</span>
+          <div className="chips" role="group" aria-label={t.channelGroup}>
+            {chips(state.lps.filter((lp) => !checkedHere(lp)))}
           </div>
         </div>
       </section>
@@ -241,8 +292,10 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
           <p className="alert" role="alert">
             {t.errors[built.error](PAIRS[ticket.pair].label)}
           </p>
+        ) : fill ? (
+          <ChannelVerdict order={order!} fill={fill} channel={channelOf(state, ticket.lpId).label} onFill={() => dispatch({ type: 'CHANNEL_FILL', ticket })} />
         ) : (
-          <Verdict trade={trade!} check={check!} onSend={() => dispatch({ type: 'SEND', ticket })} />
+          <Verdict trade={order!} check={check!} onSend={() => dispatch({ type: 'SEND', ticket })} />
         )}
 
         <LineBars title={t.psr} group={groupName} rows={psr} legend />
@@ -257,10 +310,10 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
           </p>
         )}
 
-        {check && trade && (
+        {result && trade && (
           <details className="more">
             <summary>{t.workings}</summary>
-            <Workings ctx={ctx} trade={trade} risk={check.risk} measured={check.after} group={check.group} isNew />
+            <Workings ctx={ctx} trade={trade} risk={result.risk!} measured={result.after} group={group} isNew held={psr.map((r) => r.allocated)} />
           </details>
         )}
         <details className="more">
@@ -274,6 +327,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
       <section className="settings">
         <MarketEditor state={state} dispatch={dispatch} />
         <LinesEditor state={state} dispatch={dispatch} />
+        <ChannelLimitsEditor ctx={ctx} state={state} dispatch={dispatch} />
       </section>
     </>
   );
@@ -369,11 +423,37 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
         <p className="verdict-why">
           {why}
           {check.blockedByReservation && t.onlyReservation}
+          {check.blockedByAllocation && !check.blockedByReservation && t.onlyAllocation}
         </p>
         <p className="quiet">{t.at(dates, rates)}</p>
       </div>
       <button type="button" className="primary" disabled={!check.ok} onClick={onSend}>
         {t.send}
+      </button>
+    </div>
+  );
+}
+
+/** An order on a channel that checks credit itself: the channel decides, the desk books the fill. */
+function ChannelVerdict({ order, fill, channel, onFill }: { order: Trade; fill: ChannelFill; channel: string; onFill: () => void }) {
+  const lang = useLang();
+  const t = T[lang];
+  const g = partyName(fill.group.name, lang);
+  const full = fill.fillUsd >= fill.sizeUsd - 0.5;
+  return (
+    <div className="verdict-row">
+      <div>
+        <p className="verdict">
+          <Status ok={full}>{full ? t.chFull : fill.trade ? t.chPart(mio(fill.fillUsd)) : t.chNone}</Status>
+        </p>
+        <p className="verdict-why">
+          {t.chWhy(channel, g, mio(fill.left))}
+          {fill.risk && t.chMoves(mio(fill.risk.exposure), g)}
+        </p>
+        <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
+      </div>
+      <button type="button" className="primary" disabled={!fill.trade} onClick={onFill}>
+        {t.chFill}
       </button>
     </div>
   );
@@ -396,7 +476,7 @@ function LineBars({ title, group, rows, legend }: { title: string; group: string
       {rows.map((r) => (
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>
           <span className="line-label">{r.label}</span>
-          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.hedge]} total={r.after} ok={r.ok} />
+          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.allocated, r.hedge]} total={r.after} ok={r.ok} />
           <span className="line-figure">{r.ok ? t.of(mio(r.after), mio(r.line)) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</span>
         </div>
       ))}
@@ -425,6 +505,7 @@ function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
               <td>{mio(r.board?.initial ?? r.line)}</td>
               <td>{signedMio(r.board?.today ?? 0)}</td>
               <td>{signedMio(r.reserved)}</td>
+              <td>{mio(r.allocated)}</td>
               <td>{signedMio(r.hedge)}</td>
               <td>{r.after <= r.line + 0.5 ? mio(r.line - r.after) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</td>
             </tr>
@@ -503,12 +584,12 @@ function SentHedges(p: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action>; 
 function ExistingWorkings({ ctx, state, trade }: { ctx: Ctx; state: AppState; trade: Trade }) {
   const t = T[useLang()];
   const group = groupOf(state, trade.lpId);
-  const { measured } = board(ctx, state, group.id);
+  const { measured, psr } = board(ctx, state, group.id);
   const risk = measured.risks.find((r) => r.trade.id === trade.id) ?? valueTrade(ctx, trade);
   return (
     <div className="detail">
       <p className="quiet">{t.valued(trade.id)}</p>
-      <Workings ctx={ctx} trade={trade} risk={risk} measured={measured} group={group} isNew={false} />
+      <Workings ctx={ctx} trade={trade} risk={risk} measured={measured} group={group} isNew={false} held={psr.map((r) => r.allocated)} />
     </div>
   );
 }
@@ -621,6 +702,54 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
         <input type="checkbox" checked={state.offsetNegativeMv ?? false} onChange={(e) => edit((d) => void (d.offsetNegativeMv = e.target.checked))} />
         <span>{t.offset}</span>
       </label>
+    </details>
+  );
+}
+
+function ChannelLimitsEditor({ ctx, state, dispatch }: { ctx: Ctx; state: AppState; dispatch: Dispatch<Action> }) {
+  const lang = useLang();
+  const t = T[lang];
+  return (
+    <details className="more">
+      <summary>{t.limits}</summary>
+      <p className="quiet hint">{t.limitsHint}</p>
+      <div className="table-wrap">
+        <table className="table edit-table">
+          <thead>
+            <tr>
+              {t.limitsHead.map((h, i) => (
+                <th key={h}>{i === 0 ? h : `${h} · ${t.unit}`}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state.groups.flatMap((g) =>
+              board(ctx, state, g.id).allocations.map((a) => {
+                const name = t.limitFor(CHANNELS[a.limit.channel].label, partyName(g.name, lang));
+                return (
+                  <tr key={a.limit.channel + g.id}>
+                    <td>
+                      {CHANNELS[a.limit.channel].label} · {partyName(g.name, lang)}
+                    </td>
+                    <td>
+                      <NumInput
+                        label={name}
+                        className="wide"
+                        value={a.limit.limitUsd / M}
+                        min={0}
+                        onChange={(v) => dispatch({ type: 'SET_CHANNEL_LIMIT', channel: a.limit.channel, groupId: g.id, limitUsd: v * M })}
+                      />
+                    </td>
+                    <td>{mio(a.filled)}</td>
+                    <td>{mio(a.left)}</td>
+                    <td>{t.heldIs(mio(a.left), String(a.addOnPct), mio(a.held), PILLARS[a.pillar])}</td>
+                  </tr>
+                );
+              }),
+            )}
+          </tbody>
+        </table>
+      </div>
     </details>
   );
 }

@@ -1,12 +1,14 @@
 import { PILLARS, nextWeekday, pillarEnds, pillarIndex } from './calendar';
 import { board, type BoardRow } from './lines';
 import { makeCtx } from './risk';
-import type { AppState, ISODate } from './types';
+import type { AppState, Channel, ISODate } from './types';
 
 /** What moving to the next business day changed, for the note shown afterwards. */
 export interface RollSummary {
   date: ISODate;
   lapsed: number; // hedges still in flight that were left to lapse
+  /** Channel limits cut because the group's lines could no longer hold them. */
+  limitCuts: { channel: Channel; groupName: string; from: number; to: number }[];
   groups: {
     id: string;
     name: string;
@@ -30,7 +32,11 @@ export function rollSummary(before: AppState, after: AppState): RollSummary {
     const srReleased = b.sr.filter((r) => r.key < after.businessDate).reduce((sum, r) => sum + filled(r), 0);
     if (psrBefore > 0.5 || psrAfter > 0.5 || srReleased > 0.5) groups.push({ id: g.id, name: g.name, psrBefore, psrAfter, srReleased });
   }
-  return { date: after.businessDate, lapsed: before.trades.filter((t) => t.status === 'IN_FLIGHT').length, groups };
+  const limitCuts = before.channelLimits.flatMap((l, i) => {
+    const to = after.channelLimits[i].limitUsd;
+    return to < l.limitUsd ? [{ channel: l.channel, groupName: before.groups.find((g) => g.id === l.groupId)!.name, from: l.limitUsd, to }] : [];
+  });
+  return { date: after.businessDate, lapsed: before.trades.filter((t) => t.status === 'IN_FLIGHT').length, limitCuts, groups };
 }
 
 /** The next time a filled hedge drops into a shorter pillar, which is when its add-on steps down. */

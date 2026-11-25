@@ -66,20 +66,23 @@ export interface TradeRisk {
 export const exposureOf = (mv: number, addOn: number, offsetNegativeMv: boolean) =>
   offsetNegativeMv ? Math.max(mv + addOn, 0) : Math.max(mv, 0) + addOn;
 
+/** Size of a trade for the add-on: the last (forward) leg's base amount, in USD at spot. */
+export const notionalUsd = (market: MarketData, trade: Trade) =>
+  Math.abs(trade.legs[trade.legs.length - 1].base) * usdPerUnit(market, PAIRS[trade.pair].base);
+
 export function valueTrade(ctx: Ctx, trade: Trade): TradeRisk {
   const legs = trade.legs.filter((l) => l.date >= ctx.t0).map((l) => valueLeg(ctx, trade.pair, l));
   const mv = legs.reduce((sum, l) => sum + l.mv, 0);
-  const last = trade.legs[trade.legs.length - 1];
-  const maturity = last.date;
+  const maturity = trade.legs[trade.legs.length - 1].date;
   // A trade whose last leg settles today has nothing left to replace.
   const found = pillarIndex(ctx.pillarEnds, maturity);
   // Beyond the longest pillar still counts: it uses the longest pillar and every shorter one.
   const pillar = maturity > ctx.t0 ? (found >= 0 ? found : PILLARS.length - 1) : -1;
-  const notionalUsd = Math.abs(last.base) * usdPerUnit(ctx.market, PAIRS[trade.pair].base);
+  const notional = notionalUsd(ctx.market, trade);
   const addOnPct = pillar >= 0 ? ctx.addOnPct[pillar] : 0;
-  const addOn = (notionalUsd * addOnPct) / 100;
+  const addOn = (notional * addOnPct) / 100;
   const exposure = pillar >= 0 ? exposureOf(mv, addOn, ctx.offsetNegativeMv) : 0;
-  return { trade, legs, mv, maturity, pillar, notionalUsd, addOnPct, addOn, exposure };
+  return { trade, legs, mv, maturity, pillar, notionalUsd: notional, addOnPct, addOn, exposure };
 }
 
 // ---------------------------------------------------- pre-settlement risk

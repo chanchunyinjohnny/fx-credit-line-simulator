@@ -36,6 +36,13 @@ export function defaultState(): AppState {
       { id: 'D-360T', name: 'Bank D', channel: '360T', groupId: 'D' },
       { id: 'E-360T', name: 'Bank E', channel: '360T', groupId: 'E' },
       { id: 'E-FXGO', name: 'Bank E', channel: 'FXGO', groupId: 'E' },
+      { id: 'A-LDN-EBSM', name: 'Bank A London', channel: 'EBSM', groupId: 'A' },
+      { id: 'B-EBSM', name: 'Bank B', channel: 'EBSM', groupId: 'B' },
+    ],
+    // USD 1m and 0.5m of room at the 1M add-on of 1%.
+    channelLimits: [
+      { channel: 'EBSM', groupId: 'A', limitUsd: 100 * M },
+      { channel: 'EBSM', groupId: 'B', limitUsd: 50 * M },
     ],
     addOnPct: [0.2, 0.5, 1.0, 2.0, 3.0, 4.5],
     offsetNegativeMv: false,

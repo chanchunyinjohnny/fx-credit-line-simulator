@@ -9,7 +9,7 @@ export type Side = 'BUY' | 'SELL';
 /** CLS: payment-versus-payment. GROSS: each side pays separately. CASH: one net payment (NDF). */
 export type Settlement = 'CLS' | 'GROSS' | 'CASH';
 export type TradeStatus = 'IN_FLIGHT' | 'FILLED' | 'REJECTED' | 'EXPIRED';
-export type Channel = '360T' | 'FXGO';
+export type Channel = '360T' | 'FXGO' | 'EBSM';
 
 export interface PairInfo {
   label: string;
@@ -66,11 +66,20 @@ export interface Lp {
   groupId: string;
 }
 
+/** The most a channel that checks credit itself may trade with one group in a day.
+ *  The desk sets it on the channel; the channel counts it down by trade date. */
+export interface ChannelLimit {
+  channel: Channel;
+  groupId: string;
+  limitUsd: number; // notional
+}
+
 export interface AppState {
   businessDate: ISODate;
   market: MarketData;
   groups: Group[];
   lps: Lp[];
+  channelLimits: ChannelLimit[];
   addOnPct: number[]; // percent of notional, one per time pillar
   /** Internal variant: a negative market value reduces the add-on. Off is the standard method. */
   offsetNegativeMv?: boolean;

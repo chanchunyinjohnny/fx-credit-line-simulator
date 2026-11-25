@@ -27,6 +27,8 @@ export function NumInput(p: { value: number; onChange: (v: number) => void; step
       value={text}
       step={p.step ?? 'any'}
       min={p.min}
+      // A value the app adjusted, such as a limit capped by the room left, shows as stored once the field is left.
+      onBlur={() => setText(String(p.value))}
       onChange={(e) => {
         setText(e.target.value);
         const v = e.target.valueAsNumber;

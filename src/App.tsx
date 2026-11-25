@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import { nextWeekday } from './engine/calendar';
+import { CHANNELS } from './engine/channels';
 import { nextPillarStep, rollSummary, type PillarStep, type RollSummary } from './engine/roll';
 import { START_DATE as loadDefaultDate } from './engine/defaults';
 import { LAST_DATE, loadState, reducer, saveState, type Action } from './engine/state';
@@ -38,6 +39,7 @@ const T = {
     group: (g: string, b: string, a: string, sr: string | null) =>
       `${g}: pre-settlement risk ${b} → ${a} USD mio${sr ? `; ${sr} of settlement risk released as payments settled` : ''}.`,
     lapsed: (n: number) => `${n} hedge${n > 1 ? 's' : ''} still in flight lapsed, and the reservation was released.`,
+    cut: (ch: string, g: string, from: string, to: string) => `${ch} limit with ${g} cut from ${from} to ${to} USD mio: the credit line holds no more.`,
     steady: 'Prices have not moved, so market values barely change. The add-on steps down only when a hedge drops into a shorter pillar.',
     step: (id: string, from: string, to: string, d: string) => `Next: ${id} moves from the ${from} pillar to ${to} on ${d}. Jump there to see it.`,
     footer: 'Chan Chun Yin Johnny · all data invented · saved in this browser only',
@@ -66,6 +68,7 @@ const T = {
     nothing: '沒有未到期的對沖，所以沒有變化。先送出並成交一筆對沖；之後每過一日，系統會重估這筆對沖，並釋放已交收款項的結算風險。',
     group: (g: string, b: string, a: string, sr: string | null) => `${g}：交割前風險 ${b} → ${a} 百萬美元${sr ? `；款項已交收，釋放結算風險 ${sr}` : ''}。`,
     lapsed: (n: number) => `${n} 筆在途對沖已失效，預佔額度已釋放。`,
+    cut: (ch: string, g: string, from: string, to: string) => `${ch} 對 ${g}的限額由 ${from} 減至 ${to} 百萬美元：授信額度放不下更多。`,
     steady: '價格沒有變動，所以市值幾乎不變。附加金額只在對沖跨入更短的期限檔時才下降。',
     step: (id: string, from: string, to: string, d: string) => `下一次：${id} 於 ${d} 由 ${from} 檔降至 ${to} 檔。跳到那天就能看到。`,
     footer: 'Chan Chun Yin Johnny · 所有數據均為虛構 · 只儲存在本瀏覽器',
@@ -177,11 +180,14 @@ export function App() {
             <div className="day-note" role="status">
               <div>
                 <strong>{t.now(day(note.date, lang))}</strong>
-                {note.groups.length === 0 && note.lapsed === 0 && <p>{t.nothing}</p>}
+                {note.groups.length === 0 && note.lapsed === 0 && note.limitCuts.length === 0 && <p>{t.nothing}</p>}
                 {note.groups.map((g) => (
                   <p key={g.id}>{t.group(partyName(g.name, lang), mio(g.psrBefore), mio(g.psrAfter), g.srReleased > 0.5 ? mio(g.srReleased) : null)}</p>
                 ))}
                 {note.lapsed > 0 && <p>{t.lapsed(note.lapsed)}</p>}
+                {note.limitCuts.map((c) => (
+                  <p key={c.channel + c.groupName}>{t.cut(CHANNELS[c.channel].label, partyName(c.groupName, lang), mio(c.from), mio(c.to))}</p>
+                ))}
                 {note.groups.length > 0 && note.groups.every((g) => Math.abs(g.psrAfter - g.psrBefore) < 0.05 * g.psrBefore) && <p>{t.steady}</p>}
                 {note.step && <p>{t.step(note.step.id, note.step.from, note.step.to, shortDay(note.step.date, lang))}</p>}
               </div>

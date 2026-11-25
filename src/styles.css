@@ -5,7 +5,7 @@ body { margin: 0; background: #fafaf7; }
 .app {
   --paper: #fafaf7; --ink: #30343a; --accent: #2148b8; --muted: #676d76; --rule: #dddeda; --soft: #eef1f8;
   --tint: #f2f2ed; --bad: #a62a2a; --bad-mark: #d03b3b; --ok-mark: #0b8a0b;
-  --s-used: #2148b8; --s-reserved: #1baf7a; --s-hedge: #eb6834; --track: #e6e7e1;
+  --s-used: #2148b8; --s-reserved: #1baf7a; --s-allocated: #c9479a; --s-hedge: #eb6834; --track: #e6e7e1;
   --display: Georgia, 'Songti TC', 'Noto Serif TC', serif;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   background: var(--paper); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5;
@@ -103,6 +103,7 @@ body { margin: 0; background: #fafaf7; }
 .bar-dense .seg { border-radius: 2px; }
 .seg-used { background: var(--s-used); }
 .seg-reserved { background: var(--s-reserved); }
+.seg-allocated { background: var(--s-allocated); }
 .seg-hedge { background: var(--s-hedge); }
 
 .more { border-top: 1px solid var(--rule); padding: 11px 0; }

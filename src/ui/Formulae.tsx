@@ -2,13 +2,14 @@ import { useMemo, type ReactNode } from 'react';
 import golden from '../data/golden.json';
 import { spotDate, tenorDate, tomDate } from '../engine/calendar';
 import { defaultState } from '../engine/defaults';
-import { board, checkTrade } from '../engine/lines';
+import { CHANNELS } from '../engine/channels';
+import { board, channelFill, checkTrade, maxChannelLimit } from '../engine/lines';
 import { dfUsd } from '../engine/market';
 import { makeCtx, srByDate, valueLeg } from '../engine/risk';
 import { buildTrade, reducer } from '../engine/state';
 import type { PairId, Ticket, Trade } from '../engine/types';
 import { Calc } from './bits';
-import { amt, day, mio, rate, signedAmt } from './format';
+import { amt, day, mio, partyName, rate, signedAmt } from './format';
 import { useLang } from './i18n';
 import { Workings } from './Workings';
 
@@ -16,6 +17,7 @@ const M = 1_000_000;
 const FAR_TENORS = ['SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'] as const;
 const EXAMPLE: Ticket = { product: 'SWAP', pair: 'EURUSD', side: 'BUY', amount: 20 * M, tenor: '3M', lpId: 'A-LDN-360T', settlement: 'AUTO' };
 const LATER_SPOT = 1.1767; // 1% above the starting 1.1650
+const CHANNEL_ORDER: Ticket = { product: 'NDF', pair: 'USDTWD', side: 'BUY', amount: 20 * M, tenor: '1M', lpId: 'B-EBSM', settlement: 'AUTO' };
 
 const T = {
   en: {
@@ -55,10 +57,28 @@ const T = {
       {
         title: 'The check',
         text: 'A hedge goes out only if every pillar and date stays within its line. Sending reserves the room until the LP fills or rejects. With no answer after 5 seconds the venue is asked, and the room stays reserved until it confirms no trade.',
-        calcs: ["headroom = credit line − earlier days − today's fills − reservations"],
+        calcs: ["headroom = credit line − earlier days − today's fills − reservations − room held for channels"],
+      },
+      {
+        title: 'A channel that checks credit itself',
+        text: 'An order book matches first and names the counterparty afterwards, so the desk cannot check each trade. It sets a limit on the channel and holds room for all the channel could still fill. A fill moves from held to in use, on the same line. The channel counts notional and starts again each day, so the limit is recomputed every morning.',
+        calcs: ['room held = channel limit left × add-on % of the longest order sent there', 'largest limit = filled today + free room on the line ÷ add-on %'],
       },
     ],
     steps: 'The same swap, step by step',
+    ch: 'A channel limit, step by step',
+    chIntro: (ch: string, g: string) => `${ch} with ${g}. The desk sends one order there: USD/TWD NDF, 1M.`,
+    chSteps: ['Room held this morning', 'The channel fills an order', 'The largest limit the line can hold', 'The next morning'],
+    chLimit: (l: string) => `channel limit = USD ${l} of notional`,
+    chHeld: (left: string, pct: string, held: string, to: string) => `room held = ${left} × ${pct}% = USD ${held}, on the ${to} line and every shorter one`,
+    chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} line ${line} − ${used} in use − ${held} held = ${rest} left`,
+    chFillIs: (size: string, pct: string, e: string) => `the fill: USD ${size}. In use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    chLeft: (limit: string, filled: string, left: string) => `limit left = ${limit} − ${filled} = ${left}`,
+    chTotal: (used: string, held: string, total: string) => `in use + held = ${used} + ${held} = ${total}: the same as before the fill`,
+    chTight: (p: string, line: string, used: string, room: string) => `tightest line up to 1M: ${p}, ${line} − ${used} in use = ${room} free`,
+    chMax: (filled: string, room: string, pct: string, max: string) => `largest limit = ${filled} + ${room} ÷ ${pct}% = USD ${max}`,
+    chNext: (limit: string) => `The channel starts counting again, so it can fill USD ${limit} once more. Yesterday's fill is still in use.`,
+    chWhy: 'Without a new look each morning the two would add up unnoticed. The app lowers a limit that the line can no longer hold.',
     dealt: (d: string) => `The day it is dealt, ${d}`,
     later: (r: string) => `A week later, spot up 1% to ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
@@ -80,6 +100,7 @@ const T = {
       'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a payment due on the day it is dealt always counts in full. The other leg can still go through CLS.',
       'The implied interest rate uses Actual/365 for GBP and Actual/360 for USD, EUR, JPY and CNH. Actual/365 for TWD is not confirmed.',
       'QuantLib has no Hong Kong or Taiwan lunar holidays after 2026, so USD/CNH and USD/TWD dates in 2027 ignore them.',
+      'EBS Market matches orders only where both sides hold credit for each other on the platform, and names the counterparty after the trade (EBS Dealing Rules, EBS Market appendix; EBS disclosure cover sheet). Sizing the room held by one add-on, and a single order type per channel, are simplifications of this app.',
       'Every assumption is listed in the design notes in the source repository.',
     ],
   },
@@ -120,10 +141,28 @@ const T = {
       {
         title: '交易前檢查',
         text: '每個期限檔和每個交收日都不超出額度，對沖才可送出。送出時預佔額度，直至 LP 成交或拒絕。LP 5 秒內沒有回覆，就向場地查詢；確認沒有成交才釋放。',
-        calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔'],
+        calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔 − 場地切片'],
+      },
+      {
+        title: '自行檢查額度的場地',
+        text: '訂單簿先撮合，成交後才知道對手，交易台不能逐筆檢查。交易台在場地設一個限額，並為場地還能成交的全部金額預留額度。成交後，這部分由場地切片轉為已用，記在同一條額度上。場地按名義金額計數，每日重新開始，所以每朝要重算限額。',
+        calcs: ['場地切片 = 場地尚餘限額 × 送往該場地最長期限訂單的附加因子 %', '限額上限 = 今日已成交 + 額度上的空間 ÷ 附加因子 %'],
       },
     ],
     steps: '同一筆掉期，逐步計算',
+    ch: '場地限額，逐步計算',
+    chIntro: (ch: string, g: string) => `${ch} 對 ${g}。交易台只送一種訂單到這個場地：USD/TWD NDF，1M。`,
+    chSteps: ['今朝預留的額度', '場地成交一張訂單', '額度最多放得下多大的限額', '翌日早上'],
+    chLimit: (l: string) => `場地限額 = 名義金額 USD ${l}`,
+    chHeld: (left: string, pct: string, held: string, to: string) => `場地切片 = ${left} × ${pct}% = USD ${held}，佔 ${to} 及所有更短的期限檔`,
+    chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} 額度 ${line} − 已用 ${used} − 場地切片 ${held} = 尚餘 ${rest}`,
+    chFillIs: (size: string, pct: string, e: string) => `成交 USD ${size}。已用 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    chLeft: (limit: string, filled: string, left: string) => `尚餘限額 = ${limit} − ${filled} = ${left}`,
+    chTotal: (used: string, held: string, total: string) => `已用 + 場地切片 = ${used} + ${held} = ${total}：與成交前相同`,
+    chTight: (p: string, line: string, used: string, room: string) => `1M 以內最緊的額度：${p}，${line} − 已用 ${used} = 空間 ${room}`,
+    chMax: (filled: string, room: string, pct: string, max: string) => `限額上限 = ${filled} + ${room} ÷ ${pct}% = USD ${max}`,
+    chNext: (limit: string) => `場地重新計數，所以可以再成交 USD ${limit}。昨日的成交仍然佔用額度。`,
+    chWhy: '如果每朝不重新計算，兩者會不知不覺地疊加。額度放不下時，本程式會調低限額。',
     dealt: (d: string) => `成交當日：${d}`,
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
     laterText: (k: string, mv: string, a: string, c: string) =>
@@ -145,6 +184,7 @@ const T = {
       'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以當日交收的款項一律計全額。另一邊仍可經 CLS。',
       '隱含利率的計息日數：GBP 用 Actual/365，USD、EUR、JPY、CNH 用 Actual/360；TWD 用 Actual/365，未經證實。',
       'QuantLib 沒有 2026 年之後的香港和台灣農曆假期，因此 2027 年的 USD/CNH 和 USD/TWD 交割日未計這些假期。',
+      'EBS Market 只在雙方於平台上互有額度時才撮合，成交後才披露對手（EBS Dealing Rules 的 EBS Market 附錄；EBS 的平台披露表）。以單一附加因子計算場地切片，以及每個場地只接受一種訂單，是本程式的簡化。',
       '所有假設都列在原始碼倉庫的設計說明裡。',
     ],
   },
@@ -164,6 +204,27 @@ function buildExample() {
   const ctx1 = makeCtx(s1);
   const measured1 = board(ctx1, s1, 'A').measured;
   return { s0, ctx0, trade, check, ifGross, s1, ctx1, measured1, filled: s1.trades[0], risk1: measured1.risks[0] };
+}
+
+/** One channel limit followed through a fill and into the next morning. */
+function buildChannelExample() {
+  const s0 = defaultState();
+  const ctx0 = makeCtx(s0);
+  const row = (s: typeof s0) => {
+    const b = board(makeCtx(s), s, 'B');
+    const a = b.allocations[0];
+    return { a, psr: b.psr[a.pillar] };
+  };
+  const before = row(s0);
+  const fill = channelFill(ctx0, s0, buildTrade(ctx0, CHANNEL_ORDER) as Trade);
+  const s1 = reducer(s0, { type: 'CHANNEL_FILL', ticket: CHANNEL_ORDER });
+  const after = row(s1);
+  // The tightest line the room is held on decides how large the limit can be.
+  const lines = board(makeCtx(s1), s1, 'B').psr.slice(0, after.a.pillar + 1);
+  const tight = lines.reduce((m, r) => (r.line - (r.used - r.allocated) < m.line - (m.used - m.allocated) ? r : m));
+  const max = maxChannelLimit(makeCtx(s1), s1, s1.channelLimits[1]);
+  const next = row(reducer(s1, { type: 'NEXT_DAY' }));
+  return { group: s0.groups[1], channel: CHANNELS[before.a.limit.channel].label, before, fill, after, tight, max, next };
 }
 
 /** Recompute every reference case with the app's engine and measure the gap to QuantLib. */
@@ -206,6 +267,8 @@ export function Formulae() {
   const t = T[lang];
   const ex = useMemo(buildExample, []);
   const cmp = useMemo(compareWithQuantLib, []);
+  const ch = useMemo(buildChannelExample, []);
+  const inUse = (r: { earlier: number; today: number }) => r.earlier + r.today;
   const [near, far] = ex.trade.legs;
   const total = cmp.dates.cases + cmp.rates.cases + cmp.dfs.cases + cmp.legs.cases;
   const allMatch = cmp.dates.worst === 0 && cmp.rates.worst < 1e-9 && cmp.dfs.worst < 1e-9 && cmp.legs.worst < 0.01;
@@ -260,6 +323,26 @@ export function Formulae() {
         {t.laterText(rate('EURUSD', far.rate), signedAmt(ex.risk1.mv), amt(ex.risk1.exposure), amt(Math.max(-ex.risk1.mv, 0) + ex.risk1.addOn))}
       </p>
       <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} openFrom={4} />
+
+      <h2>{t.ch}</h2>
+      <p>{t.chIntro(ch.channel, partyName(ch.group.name, lang))}</p>
+      <h3>1. {t.chSteps[0]}</h3>
+      <Calc>{t.chLimit(amt(ch.before.a.limit.limitUsd))}</Calc>
+      <Calc>{t.chHeld(amt(ch.before.a.left), String(ch.before.a.addOnPct), amt(ch.before.a.held), ch.before.psr.key)}</Calc>
+      <Calc>{t.chRoom(ch.before.psr.key, amt(ch.before.psr.line), amt(inUse(ch.before.psr)), amt(ch.before.psr.allocated), amt(ch.before.psr.headroom))}</Calc>
+      <h3>2. {t.chSteps[1]}</h3>
+      <Calc>{t.chFillIs(amt(ch.fill.fillUsd), String(ch.fill.risk!.addOnPct), amt(ch.fill.risk!.exposure))}</Calc>
+      <Calc>{t.chLeft(amt(ch.after.a.limit.limitUsd), amt(ch.after.a.filled), amt(ch.after.a.left))}</Calc>
+      <Calc>{t.chHeld(amt(ch.after.a.left), String(ch.after.a.addOnPct), amt(ch.after.a.held), ch.after.psr.key)}</Calc>
+      <Calc>{t.chTotal(amt(inUse(ch.after.psr)), amt(ch.after.psr.allocated), amt(ch.after.psr.used))}</Calc>
+      <h3>3. {t.chSteps[2]}</h3>
+      <Calc>{t.chTight(ch.tight.key, amt(ch.tight.line), amt(ch.tight.used - ch.tight.allocated), amt(ch.tight.line - (ch.tight.used - ch.tight.allocated)))}</Calc>
+      <Calc>{t.chMax(amt(ch.after.a.filled), amt(ch.tight.line - (ch.tight.used - ch.tight.allocated)), String(ch.after.a.addOnPct), amt(ch.max))}</Calc>
+      <h3>4. {t.chSteps[3]}</h3>
+      <p>{t.chNext(amt(ch.next.a.limit.limitUsd))}</p>
+      <Calc>{t.chHeld(amt(ch.next.a.left), String(ch.next.a.addOnPct), amt(ch.next.a.held), ch.next.psr.key)}</Calc>
+      <Calc>{t.chRoom(ch.next.psr.key, amt(ch.next.psr.line), amt(inUse(ch.next.psr)), amt(ch.next.psr.allocated), amt(ch.next.psr.headroom))}</Calc>
+      <p className="quiet">{t.chWhy}</p>
 
       <h2>{t.checked}</h2>
       <p>{t.checkedText(cmp.version, amt(total), allMatch)}</p>

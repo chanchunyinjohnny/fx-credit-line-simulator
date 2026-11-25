@@ -3,7 +3,7 @@ import { useLang } from './i18n';
 
 const T = {
   en: {
-    lead: "A desk hedges FX swaps with external LPs on 360T and FXGO. Today each counterparty's limit is cut into fixed slices, one per channel. The proposal holds one credit line per counterparty and checks it before a hedge goes out, whichever channel it uses.",
+    lead: "A desk hedges FX swaps, forwards and NDFs with external LPs on several channels. Today each counterparty's limit is cut into fixed slices, one per channel. The proposal holds one credit line per counterparty and keeps every hedge on it, whichever channel it uses.",
     draft: 'First draft',
     proposed: 'Proposed',
     found: 'What the review found',
@@ -17,7 +17,16 @@ const T = {
       ['A trader could edit the limit', 'The credit owner sets lines; the desk reads them'],
       ['Only one LP, up to 50 mio', 'Kept as the scope; split orders would run the flow per child'],
     ],
-    scope: 'Scope: trading by request, where the counterparty is known before the trade (FX swap, forward, NDF). An anonymous order book screens credit itself, so it needs a different design.',
+    kinds: 'Two kinds of channel',
+    kindsLead: 'What decides the design is who can say no before the trade is final.',
+    kindsHead: ['', 'The desk checks', 'The channel checks'],
+    kindsRows: [
+      ['Counterparty known', 'Before the trade is final', 'From the fill'],
+      ['What the desk does', 'Check and reserve, then fill or release', 'Hold room for the channel limit, then book each fill'],
+      ['Where', 'Request for quote or stream (360T, FXGO). An order book that asks after the match', 'An order book that fills on limits it holds (EBS Market)'],
+    ],
+    ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + held for channels + headroom.',
+    scope: 'Scope: FX swap, forward and NDF. A channel reached through a prime broker or clearing house faces that one counterparty, so it has one line of its own.',
     confirmed: 'Confirmed',
     answers: [
       'The credit owner sets a fixed limit for the desk each day. The desk counts only its own hedges against it.',
@@ -31,10 +40,11 @@ const T = {
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
       'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
+      'Room held for a channel is the limit left times the add-on of the longest order sent there. The limit is recomputed each morning.',
     ],
   },
   zh: {
-    lead: '交易台透過 360T 和 FXGO 與外部 LP 對沖外匯掉期。現時每個對手的額度按渠道切成固定幾份。建議改為每個對手只有一條授信額度，不論走哪個渠道，對沖送出前都先檢查。',
+    lead: '交易台經多個渠道與外部 LP 對沖外匯掉期、遠期和 NDF。現時每個對手的額度按渠道切成固定幾份。建議改為每個對手只有一條授信額度，不論走哪個渠道，每筆對沖都記在這一條額度上。',
     draft: '初稿',
     proposed: '建議流程',
     found: '檢視發現',
@@ -48,7 +58,16 @@ const T = {
       ['交易員可以改額度', '由授信管理部門設定額度，交易台只能查看'],
       ['只涵蓋單一 LP、5,000 萬以內', '維持這個範圍；拆單時每張子單各自走一次流程'],
     ],
-    scope: '適用範圍：詢價交易，成交前已知對手（外匯掉期、遠期、NDF）。匿名訂單簿由場地自行篩選信貸，需要另一套設計。',
+    kinds: '兩類渠道',
+    kindsLead: '設計只取決於一件事：成交前誰可以說「不」。',
+    kindsHead: ['', '交易台檢查', '場地檢查'],
+    kindsRows: [
+      ['何時知道對手', '成交前', '成交回報'],
+      ['交易台做什麼', '檢查並預佔，然後成交或釋放', '按場地限額預留額度，成交後逐筆記帳'],
+      ['例子', '詢價和持續報價（360T、FXGO）；撮合後會來問的訂單簿', '按自己持有的限額成交的訂單簿（EBS Market）'],
+    ],
+    ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 場地切片 + 可用額度。',
+    scope: '適用範圍：外匯掉期、遠期和 NDF。經主經紀商或清算所交易的渠道，對手只有那一家，另有一條自己的額度。',
     confirmed: '已確認',
     answers: [
       '授信管理部門每日給交易台一個固定額度。交易台只計自己的對沖。',
@@ -62,6 +81,7 @@ const T = {
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
       'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',
+      '場地切片 = 場地尚餘限額 × 送往該場地最長期限訂單的附加因子。限額每朝重算。',
     ],
   },
 } as const;
@@ -102,6 +122,30 @@ export function Design() {
           </tbody>
         </table>
       </div>
+
+      <h2>{t.kinds}</h2>
+      <p>{t.kindsLead}</p>
+      <div className="table-wrap">
+        <table className="table text-table">
+          <thead>
+            <tr>
+              {t.kindsHead.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {t.kindsRows.map(([k, desk, channel]) => (
+              <tr key={k}>
+                <td>{k}</td>
+                <td>{desk}</td>
+                <td>{channel}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p>{t.ledger}</p>
       <p className="quiet">{t.scope}</p>
 
       <h2>{t.confirmed}</h2>
