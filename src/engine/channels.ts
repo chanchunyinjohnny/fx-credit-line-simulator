@@ -15,6 +15,7 @@ export const CHANNELS: Record<Channel, ChannelInfo> = {
   '360T': { label: '360T', disclosed: 'BEFORE' },
   FXGO: { label: 'FXGO', disclosed: 'BEFORE' },
   EBSM: { label: 'EBS Market', disclosed: 'AFTER', only: 'NDF' },
+  LFM: { label: 'LSEG Forwards Matching', disclosed: 'AFTER', only: 'SWAP' },
 };
 
 /** Whether the desk checks and reserves before it places an order on this channel's book. */

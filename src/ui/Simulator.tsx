@@ -45,6 +45,7 @@ const T = {
       `${ch} names the counterparty only after the trade, and the desk cannot choose it. The order could fill with any of ${n} counterparties, so it is checked against each and reserved on each.`,
     bookCap: (ccy: string, x: string, g: string) => ` The largest order all of them have room for is ${ccy} ${x} mio. A larger one needs ${g} switched off at the channel, which only its credit administrator can do.`,
     bookCapNone: (g: string) => ` No size fits while ${g} is switched on at the channel. The desk cannot keep one counterparty out on its own.`,
+    bookHeld: ' It would fit on its own. Another order or hedge is still open, and its room is held on the same line whichever channel it is on.',
     bookOff: (ch: string) => `The check is switched off for ${ch}. The desk neither checks nor reserves: the channel fills on its own limits, and the desk books the fill afterwards.`,
     bookOffOver: (g: string) => ` A fill with ${g} would take a line over.`,
     place: 'Place and reserve',
@@ -101,7 +102,7 @@ const T = {
       TOO_LARGE: (_p: string, max: string) => `A hedge here can be up to USD 50 mio, which is ${max} mio. Enter that or less, or enter a larger order as several hedges.`,
       NO_TOM_NEXT: () => 'Tom-next does not exist today: tomorrow is already the spot date.',
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
-      BOOK_PRODUCT: () => 'This channel takes NDFs only here.',
+      BOOK_PRODUCT: () => 'This channel takes one product here: NDFs on EBS Market, swaps on LSEG Forwards Matching.',
       BOOK_EMPTY: () => 'No counterparty is switched on at this channel.',
     } as Record<TicketError, (pair: string, max: string) => string>,
   },
@@ -130,6 +131,7 @@ const T = {
     bookWhy: (ch: string, n: number) => `${ch} 成交後才披露對手，交易台不能選對手。這張單可能和 ${n} 個對手之中任何一個成交，所以每一個都要檢查並預佔。`,
     bookCap: (ccy: string, x: string, g: string) => `每個對手都放得下的最大金額是 ${ccy} ${x} 百萬。要掛更大的單，要由管理場地額度的人在場地上停用 ${g}。`,
     bookCapNone: (g: string) => `只要 ${g}在場地上還開通，任何金額都放不下。交易台不能單獨擋住一個對手。`,
+    bookHeld: '這張單單獨放得下。但另一張訂單或對沖還沒有結果，它的額度先留著；不論它在哪個渠道，佔的都是同一條額度。',
     bookOff: (ch: string) => `${ch} 的檢查已關掉。交易台不檢查、不預佔：場地按它自己的限額成交，成交後才記帳。`,
     bookOffOver: (g: string) => `和 ${g}成交會超出額度。`,
     place: '掛單並預佔額度',
@@ -185,7 +187,7 @@ const T = {
       TOO_LARGE: (_p: string, max: string) => `本程式每筆對沖最多 5,000 萬美元，即 ${max} 百萬。請輸入這個數或以下；較大的單分成幾筆輸入。`,
       NO_TOM_NEXT: () => '今日沒有 T/N：明日已經是即期交割日。',
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
-      BOOK_PRODUCT: () => '這個場地在本程式只做 NDF。',
+      BOOK_PRODUCT: () => '這個場地在本程式只做一種產品：EBS Market 做 NDF，LSEG Forwards Matching 做掉期。',
       BOOK_EMPTY: () => '這個場地上沒有開通的對手。',
     } as Record<TicketError, (pair: string, max: string) => string>,
   },
@@ -475,6 +477,7 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
 
 /** Of one counterparty's lines, the one this order presses hardest: the worst breach, or else the least room left. */
 function tightest(rows: LineRow[], name: string): LineRow {
+  // `rows` come labelled: a pillar for pre-settlement risk, 'SR' and a date for settlement risk.
   const over = rows.filter((r) => !r.ok).sort((a, b) => b.after - b.line - (a.after - a.line))[0];
   const touched = rows.filter((r) => Math.abs(r.hedge) > 0.5).sort((a, b) => a.line - a.after - (b.line - b.after))[0];
   const r = over ?? touched ?? rows[0];
@@ -520,6 +523,7 @@ function BookPanel(p: {
           <p className="verdict-why">
             {checking ? t.bookWhy(channel, views.length) : t.bookOff(channel)}
             {!ok && checking && (largest > 0 ? t.bookCap(PAIRS[ticket.pair].base, mio(largest), short) : t.bookCapNone(short))}
+            {!ok && checking && views.every((v) => v.check.ok || v.check.blockedByReservation) && t.bookHeld}
             {!ok && !checking && t.bookOffOver(short)}
           </p>
           <p className="quiet">{t.at(shortDay(order.legs[0].date, lang), rate(order.pair, order.legs[0].rate))}</p>
@@ -539,7 +543,7 @@ function BookPanel(p: {
         )}
       </div>
 
-      <LineBars title={t.eachTightest} group={channel} rows={views.map((v) => tightest([...v.psr, ...v.sr], name(v.check)))} legend wide />
+      <LineBars title={t.eachTightest} group={channel} rows={views.map((v) => tightest([...v.psr, ...v.sr.map((r) => ({ ...r, label: t.srRow(r.label) }))], name(v.check)))} legend wide />
 
       <details className="more">
         <summary>{t.workingsFor(name(focus.check))}</summary>

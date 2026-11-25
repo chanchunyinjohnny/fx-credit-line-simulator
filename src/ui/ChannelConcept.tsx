@@ -29,6 +29,7 @@ const T = {
     inUse: (x: number) => `${x} in use`,
     sum: (a: number, b: number, ok: boolean) => `${a} + ${b} = ${a + b}${ok ? '' : `, over ${LINE}`}`,
     reserved: (a: number, b: number) => `${a} in use, ${b} reserved`,
+    shared: 'The 4 is what is left of Bank Z’s line, for every channel together. A reservation sits on the counterparty’s line, not on the channel. While this order is open, an order on another book, or a hedge sent to Bank Z itself, finds that 4 already taken.',
     note: 'The counterparty with the tightest line sets how large the order can be. Once Bank Z’s line is full, no order can be placed on the channel at all. The desk cannot keep one counterparty out from its own side: it can only cut the order, or stop sending orders to the whole channel. Excluding Bank Z alone means setting its limit at the channel to zero, and that is done by whoever administers credit there.',
   },
   zh: {
@@ -47,6 +48,7 @@ const T = {
     inUse: (x: number) => `已用 ${x}`,
     sum: (a: number, b: number, ok: boolean) => `${a} + ${b} = ${a + b}${ok ? '' : `，超過 ${LINE}`}`,
     reserved: (a: number, b: number) => `已用 ${a}，預佔 ${b}`,
+    shared: '這個 4 是丙銀行整條額度剩下的，所有渠道合計。預佔記在對手的額度上，不是記在場地上。這張訂單還掛著的時候，另一個場地的訂單，或者一筆送給丙銀行的詢價，都會看到這 4 已經被佔。',
     note: '額度最緊的那個對手，決定訂單能做多大。丙銀行的額度用完時，這個場地就一張單也掛不了。交易台不能從自己這邊單獨擋住一個對手：它只能縮小訂單，或者整個場地停止下單。要單獨排除丙銀行，只能在場地上把它的限額設為零，這要由管理場地額度的人做。',
   },
 } as const;
@@ -93,6 +95,7 @@ export function ChannelConcept() {
           </tbody>
         </table>
       </div>
+      <p>{t.shared}</p>
       <p className="quiet">{t.note}</p>
     </>
   );

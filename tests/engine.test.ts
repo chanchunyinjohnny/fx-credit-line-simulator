@@ -341,6 +341,22 @@ describe('a channel that discloses the counterparty after the trade', () => {
     expect(checkTrade(makeCtx(s), s, deal(s, swap)).ok).toBe(true);
   });
 
+  it('an order resting on one book leaves less room on every other channel', () => {
+    // Bank E is on both books; its 3M line is 1,000,000. An NDF order of 30m rests on EBS Market:
+    // 30m x 2% = 600,000 reserved on E. A EUR 20m 3M swap would use 466,000: 1,066,000 in all.
+    let s = reducer(defaultState(), { type: 'SEND', ticket: order({ tenor: '3M', amount: 30 * M }) });
+    const swap: Ticket = { ...ticket(), book: 'LFM' };
+    const checks = (candidates(makeCtx(s), s, swap) as Trade[]).map((t) => [t.lpId, checkTrade(makeCtx(s), s, t).ok]);
+    expect(checks).toEqual([['B-LFM', true], ['C-LFM', true], ['E-LFM', false]]);
+    expect(reducer(s, { type: 'SEND', ticket: swap })).toBe(s);
+    // What E has left, 400,000, takes EUR 17,167,381 at 2% of 1.1650: the cap is E's line, whichever book the order is on.
+    expect(largestThatFits(makeCtx(s), s, swap)).toBe(17_167_000);
+    // The first order fills with Bank B. E is released, and the swap fits on the other book.
+    s = reducer(s, { type: 'FILL', id: 'H1-B' });
+    s = reducer(s, { type: 'SEND', ticket: swap });
+    expect(statuses(s).slice(3)).toEqual([['H2-B', 'IN_FLIGHT'], ['H2-C', 'IN_FLIGHT'], ['H2-E', 'IN_FLIGHT']]);
+  });
+
   it('with the check switched off, nothing is reserved and a fill can take a line over', () => {
     // 20m of 6M NDF uses 600,000; Bank E's 6M line is 500,000.
     const s0 = reducer(defaultState(), { type: 'SWITCH_BOOK_CHECK', channel: 'EBSM', on: false });

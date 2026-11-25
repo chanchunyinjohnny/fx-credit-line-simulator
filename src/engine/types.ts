@@ -10,7 +10,7 @@ export type Side = 'BUY' | 'SELL';
 export type Settlement = 'CLS' | 'GROSS' | 'CASH';
 /** UNFILLED: the order was filled with another counterparty, or with none, and this reservation was released. */
 export type TradeStatus = 'IN_FLIGHT' | 'FILLED' | 'REJECTED' | 'UNFILLED' | 'EXPIRED';
-export type Channel = '360T' | 'FXGO' | 'EBSM';
+export type Channel = '360T' | 'FXGO' | 'EBSM' | 'LFM';
 
 export interface PairInfo {
   label: string;

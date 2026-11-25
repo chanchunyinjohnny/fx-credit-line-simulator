@@ -36,7 +36,7 @@ const T = {
     kindsWhere: {
       send: 'Request for quote or stream: 360T, FXGO.',
       callback: 'An order book that names the counterparty and asks.',
-      channel: 'An order book that names the counterparty afterwards: EBS Market.',
+      channel: 'An order book that names the counterparty afterwards: EBS Market, LSEG Forwards Matching.',
     },
     legend: 'The shaded step is where the desk decides on the credit line. It is the same check in all three.',
     canHead: 'Disclosed after the trade: what the desk can and cannot do',
@@ -102,7 +102,7 @@ const T = {
     kindsWhere: {
       send: '詢價和持續報價：360T、FXGO。',
       callback: '撮合後披露對手、並來問的訂單簿。',
-      channel: '成交後才披露對手的訂單簿：EBS Market。',
+      channel: '成交後才披露對手的訂單簿：EBS Market、LSEG Forwards Matching。',
     },
     legend: '有底色的一步，是交易台決定額度夠不夠的地方。三個流程用的是同一個檢查。',
     canHead: '事後披露的渠道：做得到和做不到的',

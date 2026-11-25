@@ -60,7 +60,7 @@ Pre-settlement and settlement risk are credit policy rather than pricing, so no 
 ```sh
 npm install
 npm run dev      # local server
-npm test         # 38 tests
+npm test         # 39 tests
 npm run build    # static site in dist/
 npm run oracle   # regenerate the QuantLib reference values (needs uv)
 ```
@@ -69,7 +69,7 @@ No server and no accounts: state is kept in the browser's local storage, and Res
 
 ## Scope and limits
 
-- Two kinds of channel: disclosed before the trade, where the desk knows the counterparty and checks before the trade is final (request for quote or stream), and disclosed after the trade, where the order is checked against every counterparty that could fill it (an order book, here taking NDFs only, and filling an order once, in full). An order book that names the counterparty and asks the desk after a match is of the first kind and is not modelled separately. Channels reached through a prime broker or clearing house are out of scope.
+- Two kinds of channel: disclosed before the trade, where the desk knows the counterparty and checks before the trade is final (request for quote or stream), and disclosed after the trade, where the order is checked against every counterparty that could fill it (two order books here, one taking NDFs and one taking swaps; an order fills once, in full). Both draw on the same lines as every other channel. An order book that names the counterparty and asks the desk after a match is of the first kind and is not modelled separately. Channels reached through a prime broker or clearing house are out of scope.
 - One LP per hedge, up to USD 50 mio. Split orders are not modelled.
 - Standard tenors from overnight to one year. Forward-forward swaps and NDF fixing dates are not modelled.
 - QuantLib 1.44 carries no lunar holidays for Hong Kong or Taiwan after 2026, so USD/CNH and USD/TWD value dates in 2027 ignore them.
