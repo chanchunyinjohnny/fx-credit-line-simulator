@@ -1,3 +1,4 @@
+import { ChannelConcept } from './ChannelConcept';
 import { ChannelFlow, FlowDiagram, flowTitle, type FlowKind } from './FlowDiagram';
 import { useLang } from './i18n';
 
@@ -31,14 +32,14 @@ const T = {
     can: 'Can',
     canList: [
       'Keep every counterparty within its line. The channel fills only within the limit, and the room is held before the limit is set.',
-      'Book each fill on the same line as every other hedge, as soon as the fill names the counterparty.',
+      'Book each fill on the same line as every other hedge, netted the same way, as soon as the fill names the counterparty.',
       'Stop filling with a counterparty. With no room left, its limit on the channel is zero.',
     ],
     cannot: 'Cannot',
     cannotList: [
       'Approve or refuse a single trade, or choose the counterparty.',
       'Avoid idle room. Some is held for every counterparty on the channel, whether or not it trades.',
-      'Hold the exact amount. The room is sized on the longest order sent there, before any netting.',
+      'Hold only what the trade will use. The desk cannot tell which of its orders will fill, and the channel limit is one amount for every tenor. So it holds for the worst case: the longest order it has there. The excess comes back when the fill is booked.',
       'Work where limits on the channel cannot be changed during the day. That falls back to one fixed slice a day.',
     ],
     ledger: 'Every fill lands on the same line. At any moment: credit line = in use + reserved + held for channels + headroom.',
@@ -58,7 +59,7 @@ const T = {
       'The add-on depends on remaining maturity and is the same for every product.',
       'A negative market value does not reduce the add-on.',
       'With no answer from the LP after 5 seconds, the venue is asked. The reservation stays until the venue confirms no trade.',
-      'Room held for a channel is the amount it can fill times the add-on of the longest order sent there. It is topped up after each fill.',
+      'The channel limit is the largest trade the desk allows there. Room held is that limit times the add-on of the longest order sent there, with no netting; the fill is netted when it is booked. The limit is topped up after each fill.',
     ],
   },
   zh: {
@@ -88,14 +89,14 @@ const T = {
     can: '做得到',
     canList: [
       '每個對手都不會超額。場地只在限額之內成交，而額度是先預留、後設限額。',
-      '成交回報一披露對手，就記在同一條額度上，和其他對沖一樣。',
+      '成交回報一披露對手，就記在同一條額度上，和其他對沖一樣計淨額。',
       '停止和某個對手成交。額度沒有空間時，它在場地上的限額就是零。',
     ],
     cannot: '做不到',
     cannotList: [
       '批准或拒絕個別成交，或者選擇對手。',
       '避免額度閒置。場地上每個對手都要預留一份，不論有沒有成交。',
-      '預留得剛剛好。只能按送往該場地最長期限的訂單預留，而且未計淨額。',
+      '預留得剛剛好。成交前不知道哪一張訂單會成交，而場地限額只有一個金額，不分期限。所以按最壞情況預留：掛在那裡期限最長的訂單。多留的在記帳後退回。',
       '在場地不能即日改限額時運作。那就只能退回每日固定切一份。',
     ],
     ledger: '每筆成交都記在同一條額度上。任何時刻：授信額度 = 已用 + 預佔 + 場地切片 + 可用額度。',
@@ -114,7 +115,7 @@ const T = {
       '附加因子按剩餘期限分檔，各產品相同。',
       '市值為負時，附加金額不減少。',
       'LP 5 秒內沒有回覆，就向場地查詢。場地確認沒有成交，才釋放預佔額度。',
-      '場地切片 = 場地現在可成交的金額 × 送往該場地最長期限訂單的附加因子。每次成交後補回。',
+      '場地限額是交易台容許的最大一筆。場地切片 = 場地限額 × 送往該場地最長期限訂單的附加因子，按全額預留；成交後按淨額記帳。每次成交後補回限額。',
     ],
   },
 } as const;
@@ -170,6 +171,8 @@ export function Design() {
       </div>
       <p className="quiet">{t.legend}</p>
       <p>{t.ledger}</p>
+
+      <ChannelConcept />
 
       <h3>{t.canHead}</h3>
       <div className="grid-two can-cannot">

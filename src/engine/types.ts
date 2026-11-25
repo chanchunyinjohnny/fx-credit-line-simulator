@@ -72,7 +72,7 @@ export interface Lp {
 export interface ChannelBuffer {
   channel: Channel;
   groupId: string;
-  keepUsd: number; // notional
+  keepUsd: number; // notional of the largest trade the channel may fill; the desk keeps this much available there
 }
 
 export interface AppState {

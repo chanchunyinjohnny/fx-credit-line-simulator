@@ -14,7 +14,7 @@ All counterparties, credit lines, add-ons and prices are invented. The interface
 - **Time pillars.** Pre-settlement lines are set per maturity pillar. A hedge counts in the pillar it matures in and in every shorter one.
 - **Check, reserve, fill.** A hedge is checked before it goes out. Sending it reserves the room; a fill turns the reservation into utilisation; a rejection releases it. Without the reservation, two hedges in flight could both pass and both fill.
 - **Lines sit on the banking group.** Two entities of one group, or one LP reached on two channels, draw on the same lines.
-- **A channel that checks credit itself.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade, but it fills only within the limit the desk has set there. The desk holds room on the credit line first and sets the limit to match. A fill turns that room into utilisation, on the same line as every other hedge, and the desk tops the room up again from headroom. As the line fills it tops up less; at zero the channel stops filling with that counterparty. The Design view lists what the desk can and cannot do on such a channel.
+- **A channel that checks credit itself.** An order book that matches first and names the counterparty afterwards cannot be checked trade by trade, but it fills only within the limit the desk has set there. That limit is the largest trade the desk allows. The desk holds the room that trade would use on the credit line first, then sets the limit. A fill turns that room into utilisation, on the same line as every other hedge, and the desk tops the room up again from headroom. As the line fills the limit shrinks; at zero the channel stops filling with that counterparty. The Design view draws this on one line of 100 and lists what the desk can and cannot do on such a channel.
 - **Time passing.** "Next day", or a jump to any later date, revalues open hedges, drops settled payments out of settlement risk, and says what changed. With prices unchanged, exposure moves only when a hedge drops into a shorter pillar; the note says when that will be.
 
 ## The four views
@@ -39,8 +39,8 @@ Design notes, in Chinese: [DESIGN.zh.md](DESIGN.zh.md) explains how the design w
 | Pre-settlement risk, close-out netting | max(Σ market value, 0) + net add-on, with net add-on = (0.4 + 0.6 × NGR) × gross add-on |
 | Settlement risk on a date | everything due to be received that day, in USD at spot; zero for payment-versus-payment (CLS) and for NDFs. A payment due on the day it is dealt always counts in full |
 | Headroom | credit line − earlier days' hedges − today's fills − reservations − room held for channels |
-| Room held for a channel | amount available on the channel × add-on % of the longest order sent there, on that pillar and every shorter one |
-| Amount available on a channel | min(amount the desk wants to keep there, free room on the line ÷ add-on %) |
+| Channel limit | min(largest trade the desk allows there, free room on the line ÷ add-on %) |
+| Room held for a channel | channel limit × add-on % of the longest order sent there, on that pillar and every shorter one |
 
 ## How the numbers are checked
 

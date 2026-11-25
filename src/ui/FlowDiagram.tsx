@@ -246,9 +246,9 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
     },
     channel: {
       title: 'The channel checks',
-      desc: 'Flow: the desk holds room on the line and sets the channel limit to the same amount, the channel matches and fills within that limit without asking, the fill report names the counterparty and the held room becomes usage, and the desk holds room again and raises the limit if the line has room, which leads back to the channel matching.',
+      desc: 'Flow: the desk holds room on the line for the largest trade it allows and sets the channel limit to that trade, the channel matches and fills within that limit without asking, the fill report names the counterparty and the held room becomes usage, and the desk holds room again and raises the limit if the line has room, which leads back to the channel matching.',
       steps: [
-        ['Hold room, then set the limit', 'the same amount, per counterparty'],
+        ['Hold room, then set the limit', 'the largest trade, per counterparty'],
         ['Channel matches and fills', 'within the limit, without asking'],
         ['Fill report: held becomes used', 'the counterparty is now known'],
         ['Hold room again, raise limit', 'not if the line has no room'],
@@ -282,9 +282,9 @@ const FLOWS: Record<Lang, Record<FlowKind, FlowCopy>> = {
     },
     channel: {
       title: '場地檢查',
-      desc: '流程：交易台先在額度上預留場地切片，再把場地限額設為同一金額；場地在限額之內撮合並成交，不問交易台；成交回報披露對手，切片轉為已用；額度有空間，交易台就再預留並補回限額，然後回到場地撮合。',
+      desc: '流程：交易台先在額度上按最大一筆預留場地切片，再把場地限額設為這一筆的金額；場地在限額之內撮合並成交，不問交易台；成交回報披露對手，切片轉為已用；額度有空間，交易台就再預留並補回限額，然後回到場地撮合。',
       steps: [
-        ['先預留場地切片', '再把場地限額設為同一金額'],
+        ['先預留場地切片', '再設場地限額：最大一筆'],
         ['場地撮合並成交', '限額之內，不問交易台'],
         ['成交回報：切片轉為已用', '這時才知道對手'],
         ['從可用額度補回切片', '額度沒有空間就不補'],

@@ -105,6 +105,18 @@ body { margin: 0; background: #fafaf7; }
 .seg-reserved { background: var(--s-reserved); }
 .seg-allocated { background: var(--s-allocated); }
 .seg-hedge { background: var(--s-hedge); }
+.seg-headroom { background: var(--track); }
+/* One credit line drawn at several moments, with its figures beside it. */
+.concept { white-space: normal; margin: 6px 0 10px; }
+.concept th .seg { display: inline-block; width: 14px; height: 10px; border-radius: 5px; margin-right: 6px; }
+.concept th:nth-child(2) { text-align: left; }
+.concept td { vertical-align: middle; }
+.concept td:first-child { min-width: 200px; }
+.concept td:first-child strong { display: block; font-weight: 600; }
+.concept td:first-child span { font-size: 13px; color: var(--muted); }
+.concept .concept-bar { width: 34%; min-width: 160px; }
+.concept .bar { height: 16px; border-radius: 4px; }
+.concept .bar .seg { border-radius: 4px; }
 
 .more { border-top: 1px solid var(--rule); padding: 11px 0; }
 .more > summary { cursor: pointer; color: var(--accent); }
@@ -178,6 +190,7 @@ body { margin: 0; background: #fafaf7; }
 .method-row h3 { margin: 0; }
 .grid-two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin: 26px 0 0; }
 .grid-two h2 { margin-top: 0; }
+.grid-two > * { min-width: 0; }
 .can-cannot { margin-top: 8px; gap: 32px; }
 .can-cannot h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .can-cannot ul { margin: 0; padding-left: 18px; }
@@ -207,6 +220,9 @@ body { margin: 0; background: #fafaf7; }
   .stats, .grid-two { grid-template-columns: 1fr; gap: 0; }
   .grid-three { grid-template-columns: 1fr; gap: 22px; }
   .grid-three .quiet { min-height: 0; }
+  .concept td:first-child { min-width: 148px; }
+  .concept .concept-bar { min-width: 72px; }
+  .concept th, .concept td { padding-left: 6px; padding-right: 6px; }
   .stat + .stat { border-left: 0; border-top: 1px solid var(--rule); padding-left: 0; }
   .grid-two section + section { margin-top: 26px; }
   .method-row { grid-template-columns: 1fr; gap: 8px; }

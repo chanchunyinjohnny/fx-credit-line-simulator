@@ -85,9 +85,9 @@ const T = {
     offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
     limits: 'Room held for a channel that checks credit itself',
     limitsHint:
-      'The channel can fill this much with a group without asking. The desk holds the same room on the credit line first, then sets the limit on the channel. After each fill it holds room again and tops the limit up. As the line fills it tops up less, and at zero the channel stops filling with that group.',
-    limitsHead: ['Channel and group', 'Keep available', 'Available now', 'Filled today', 'Held on the credit line'],
-    limitFor: (ch: string, g: string) => `Keep available on ${ch} with ${g}`,
+      'The largest trade the channel may fill with a group without asking the desk. The desk holds room for that trade on the credit line first, then sets the limit on the channel. After each fill it holds room again and sets the limit back. As the line fills the limit shrinks, and at zero the channel stops filling with that group.',
+    limitsHead: ['Channel and group', 'Largest trade', 'Channel limit now', 'Filled today', 'Held on the credit line'],
+    limitFor: (ch: string, g: string) => `Largest trade on ${ch} with ${g}`,
     heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}, on ${pillar} and shorter`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} is deliverable: use a swap or forward.`,
@@ -166,9 +166,9 @@ const T = {
     addOn: '附加因子 %',
     offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
     limits: '場地切片：為自行檢查額度的場地預留的額度',
-    limitsHint: '場地不用問交易台，最多可以和一個集團成交這個金額。交易台先在授信額度上預留同等份額，再設場地限額。每次成交後再預留，補回限額。額度越滿，補得越少；到零時，場地不再和這個集團成交。',
-    limitsHead: ['場地和集團', '保持可成交', '現在可成交', '今日已成交', '授信額度上預留'],
-    limitFor: (ch: string, g: string) => `${ch} 對 ${g}保持可成交`,
+    limitsHint: '最大一筆：場地不用問交易台，一筆最多可以和一個集團成交多少。交易台先在授信額度上預留這一筆要用的額度，再設場地限額。每次成交後再預留，把限額設回來。額度越滿，限額越小；到零時，場地不再和這個集團成交。',
+    limitsHead: ['場地和集團', '最大一筆', '現在的場地限額', '今日已成交', '授信額度上預留'],
+    limitFor: (ch: string, g: string) => `${ch} 對 ${g}的最大一筆`,
     heldIs: (left: string, pct: string, held: string, pillar: string) => `${left} × ${pct}% = ${held}，佔 ${pillar} 及更短的期限檔`,
     errors: {
       USE_SWAP_OR_FORWARD: (p: string) => `${p} 可交割：請用掉期或遠期。`,

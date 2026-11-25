@@ -57,8 +57,8 @@ const T = {
       },
       {
         title: 'A channel that checks credit itself',
-        text: 'An order book matches first and names the counterparty afterwards, so the desk cannot check each trade. But the channel fills only within the limit the desk has set there. So the desk holds room on the credit line first and sets the limit to match. A fill turns that held room into usage, exactly as a reservation does. The desk then holds room again and tops the limit up. As the line fills it tops up less; at zero the channel stops filling with that counterparty.',
-        calcs: ['room held = amount available on the channel × add-on % of the longest order sent there', 'amount available = min(amount to keep, free room on the line ÷ add-on %)'],
+        text: 'An order book matches first and names the counterparty afterwards, so the desk cannot check each trade. But the channel fills only within the limit the desk has set there. That limit is the largest trade the desk allows. The desk holds the room that trade would use on the credit line first, then sets the limit. A fill turns the held room into usage, exactly as a reservation does. The desk then holds room again and sets the limit back. As the line fills the limit shrinks; at zero the channel stops filling with that counterparty. The channel limit is one trade amount for every tenor, while the add-on rises with tenor. With orders of several tenors there, the desk holds for the longest; if a shorter one fills, the excess comes back when it is booked.',
+        calcs: ['channel limit = min(largest trade, free room on the line ÷ add-on %)', 'room held = channel limit × add-on % of the longest order sent there'],
       },
     ],
     steps: 'The same swap, step by step',
@@ -67,18 +67,19 @@ const T = {
     laterText: (k: string, mv: string, a: string, c: string) =>
       `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
     ch: 'A channel that checks credit itself, step by step',
-    chIntro: (ch: string, g: string, keep: string) => `${ch} with ${g}. The desk sends one order there, USD/TWD NDF 1M, and keeps USD ${keep} available.`,
+    chIntro: (ch: string, g: string, keep: string) => `${ch} with ${g}. The desk sends one order there, USD/TWD NDF 1M, and allows a trade of up to USD ${keep}. The channel limit is a trade amount and the credit line is a risk amount; the add-on converts one into the other.`,
+    chSuppose: (g: string, fill: string) => `Suppose the channel matches a trade of USD ${fill} with ${g}: the largest it may.`,
     chSteps: ['Before any fill: hold room, then set the limit', 'The channel fills an order', 'The fill report: book it, then top up', 'When the line runs short'],
-    chHeld: (avail: string, pct: string, held: string, to: string) => `room held = ${avail} × ${pct}% = USD ${held}, on the ${to} line and every shorter one`,
+    chHeld: (avail: string, pct: string, held: string, to: string) => `room held = channel limit ${avail} × ${pct}% = USD ${held}, on the ${to} line and every shorter one`,
     chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} line ${line} − ${used} in use − ${held} held = ${rest} left`,
-    chAtChannel: (avail: string, fill: string, rest: string) => `at the channel: ${avail} available − ${fill} filled = ${rest}. The desk does not yet know with whom.`,
+    chAtChannel: (avail: string, fill: string, rest: string) => `at the channel: limit ${avail} − ${fill} filled = ${rest}. The desk does not yet know with whom.`,
     chSafe: (e: string, held: string) => `the most this can add is ${e}, and ${held} is already held: the line cannot be exceeded`,
     chBook: (size: string, pct: string, e: string) => `in use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
     chFree: (p: string, line: string, used: string, room: string) => `free room on the ${p} line = ${line} − ${used} in use = ${room}`,
-    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `amount available = min(${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
+    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `channel limit = min(largest trade ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
     chCost: (before: string, after: string) => `The fill has come out of headroom: ${before} before, ${after} after. The room held is the same as before.`,
     chShortIntro: (line: string, used: string) => `Take a 1M line of ${line} with ${used} already in use.`,
-    chStop: (p: string, line: string, used: string) => `Once ${used} of the ${p} line of ${line} is in use, free room is 0 and the amount available is 0. The channel no longer fills with this group, and nothing went over the line.`,
+    chStop: (p: string, line: string, used: string) => `Once ${used} of the ${p} line of ${line} is in use, free room is 0 and the channel limit is 0. The channel no longer fills with this group, and nothing went over the line.`,
     more: 'Assumptions, limits and sources',
     notes: [
       'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
@@ -132,8 +133,8 @@ const T = {
       },
       {
         title: '自行檢查額度的場地',
-        text: '訂單簿先撮合，成交後才知道對手，交易台不能逐筆檢查。但場地只會在交易台設定的限額之內成交。所以交易台先在授信額度上預留一份（場地切片），再把場地限額設為同一金額。成交後，這份切片轉為已用，和預佔轉為已用一樣。交易台隨即再預留，補回限額。額度越滿，補得越少；到零時，場地不再和這個對手成交。',
-        calcs: ['場地切片 = 場地現在可成交的金額 × 送往該場地最長期限訂單的附加因子 %', '現在可成交 = min(要保持的金額, 額度上的空間 ÷ 附加因子 %)'],
+        text: '訂單簿先撮合，成交後才知道對手，交易台不能逐筆檢查。但場地只會在交易台設定的限額之內成交。這個限額就是交易台容許的最大一筆。交易台先在授信額度上預留這一筆要用的額度（場地切片），再設限額。成交後，這份切片轉為已用，和預佔轉為已用一樣。交易台隨即再預留，把限額設回來。額度越滿，限額越小；到零時，場地不再和這個對手成交。場地限額是一個交易金額，不分期限；附加因子卻是期限越長越大。在場地上掛了幾種期限的訂單時，按最長的那種預留；成交的若是較短的，多留的在記帳後退回。',
+        calcs: ['場地限額 = min(最大一筆, 額度上的空間 ÷ 附加因子 %)', '場地切片 = 場地限額 × 送往該場地最長期限訂單的附加因子 %'],
       },
     ],
     steps: '同一筆掉期，逐步計算',
@@ -142,18 +143,19 @@ const T = {
     laterText: (k: string, mv: string, a: string, c: string) =>
       `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
     ch: '自行檢查額度的場地，逐步計算',
-    chIntro: (ch: string, g: string, keep: string) => `${ch} 對 ${g}。交易台只送一種訂單到這個場地（USD/TWD NDF，1M），並保持 USD ${keep} 可成交。`,
+    chIntro: (ch: string, g: string, keep: string) => `${ch} 對 ${g}。交易台只送一種訂單到這個場地（USD/TWD NDF，1M），一筆最多做 USD ${keep}。場地限額是交易金額，授信額度是風險金額，兩者用附加因子換算。`,
+    chSuppose: (g: string, fill: string) => `假設場地和 ${g}撮合了一筆 USD ${fill}，即最大的一筆。`,
     chSteps: ['成交之前：先預留，再設限額', '場地成交一張訂單', '成交回報：記帳，然後補回', '額度快用完的時候'],
-    chHeld: (avail: string, pct: string, held: string, to: string) => `場地切片 = ${avail} × ${pct}% = USD ${held}，佔 ${to} 及所有更短的期限檔`,
+    chHeld: (avail: string, pct: string, held: string, to: string) => `場地切片 = 場地限額 ${avail} × ${pct}% = USD ${held}，佔 ${to} 及所有更短的期限檔`,
     chRoom: (p: string, line: string, used: string, held: string, rest: string) => `${p} 額度 ${line} − 已用 ${used} − 場地切片 ${held} = 尚餘 ${rest}`,
-    chAtChannel: (avail: string, fill: string, rest: string) => `場地上：可成交 ${avail} − 成交 ${fill} = ${rest}。交易台這時還不知道對手是誰。`,
+    chAtChannel: (avail: string, fill: string, rest: string) => `場地上：限額 ${avail} − 成交 ${fill} = ${rest}。交易台這時還不知道對手是誰。`,
     chSafe: (e: string, held: string) => `這筆最多增加 ${e}，而額度上已經預留了 ${held}：不可能超額`,
     chBook: (size: string, pct: string, e: string) => `已用 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
     chFree: (p: string, line: string, used: string, room: string) => `${p} 額度上的空間 = ${line} − 已用 ${used} = ${room}`,
-    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `現在可成交 = min(${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
+    chAvail: (keep: string, room: string, pct: string, fits: string, avail: string) => `場地限額 = min(最大一筆 ${keep}, ${room} ÷ ${pct}%) = min(${keep}, ${fits}) = ${avail}`,
     chCost: (before: string, after: string) => `這筆成交用掉的是可用額度：之前 ${before}，之後 ${after}。場地切片和成交前一樣。`,
     chShortIntro: (line: string, used: string) => `假設 1M 額度是 ${line}，已用 ${used}。`,
-    chStop: (p: string, line: string, used: string) => `到 ${p} 額度 ${line} 已用 ${used} 時，空間是 0，可成交金額是 0。場地不再和這個集團成交，全程沒有超出額度。`,
+    chStop: (p: string, line: string, used: string) => `到 ${p} 額度 ${line} 已用 ${used} 時，空間是 0，場地限額是 0。場地不再和這個集團成交，全程沒有超出額度。`,
     more: '假設、限制與資料來源',
     notes: [
       '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
@@ -272,6 +274,7 @@ export function Formulae() {
       <Calc>{t.chHeld(amt(ch.before.a.available), String(ch.before.a.addOnPct), amt(ch.before.a.held), ch.before.psr.key)}</Calc>
       <Calc>{t.chRoom(ch.before.psr.key, amt(ch.before.psr.line), amt(ch.before.inUse), amt(ch.before.psr.allocated), amt(ch.before.psr.headroom))}</Calc>
       <h3>2. {t.chSteps[1]}</h3>
+      <p>{t.chSuppose(partyName(ch.group.name, lang), amt(ch.fill.fillUsd))}</p>
       <Calc>{t.chAtChannel(amt(ch.fill.available), amt(ch.fill.fillUsd), amt(ch.fill.available - ch.fill.fillUsd))}</Calc>
       <Calc>{t.chSafe(amt(ch.fill.risk!.exposure), amt(ch.before.a.held))}</Calc>
       <h3>3. {t.chSteps[2]}</h3>
