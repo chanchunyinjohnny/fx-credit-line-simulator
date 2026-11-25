@@ -53,6 +53,7 @@ const T = {
     at: (dates: string, rates: string) => `${dates} at ${rates}`,
     send: 'Send and reserve',
     psr: 'Pre-settlement risk',
+    pillarWhy: (to: string) => `This hedge matures in the ${to} pillar, so it counts there and in every shorter one. Each line caps the risk still open at that point; it is the same amount against each line, not added up.`,
     sr: 'Settlement risk',
     unit: 'USD mio',
     of: (a: string, l: string) => `${a} of ${l}`,
@@ -137,6 +138,7 @@ const T = {
     at: (dates: string, rates: string) => `${dates}，匯率 ${rates}`,
     send: '送出並預佔額度',
     psr: '交割前風險',
+    pillarWhy: (to: string) => `這筆對沖在 ${to} 檔到期，所以計入 ${to} 檔和所有更短的期限檔。每一檔限制的是到那時仍未到期的風險；各檔是同一個金額分別對照，不是加起來。`,
     sr: '結算風險',
     unit: '百萬美元',
     of: (a: string, l: string) => `${a} / ${l}`,
@@ -327,6 +329,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
             )}
 
             <LineBars title={t.psr} group={groupName} rows={psr} legend />
+            {check && PILLARS[check.risk.pillar] && <p className="quiet pillar-why">{t.pillarWhy(PILLARS[check.risk.pillar])}</p>}
             {sr.length > 0 ? (
               <LineBars title={t.sr} group={groupName} rows={sr} />
             ) : (

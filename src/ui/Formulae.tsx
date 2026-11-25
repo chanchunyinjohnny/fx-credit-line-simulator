@@ -39,8 +39,9 @@ const T = {
       },
       {
         title: 'Pre-settlement risk',
-        text: "Today's value if it is positive, plus an add-on for how far it could still move. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one.",
+        text: "Today's value if it is positive, plus an add-on for how far it could still move. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one, because each pillar's line caps the risk still open at that point: the overnight line takes every hedge, the 3M line only those that run past the 1M pillar. The same amount shows in each of those pillars; it is one risk measured against several lines, not added up. Longer risk is worth less room, so lines usually step down as the tenor grows.",
         calcs: [
+          'a 3M swap counts in O/N, 1W, 1M and 3M, and not in 6M or 1Y',
           'exposure = max(market value, 0) + notional × add-on %',
           'with close-out netting: max(Σ market value, 0) + (0.4 + 0.6 × NGR) × Σ add-on',
           'NGR = max(Σ market value, 0) ÷ Σ max(market value, 0)',
@@ -116,8 +117,9 @@ const T = {
       },
       {
         title: '交割前風險',
-        text: '今日市值（為正數時），加上一個反映日後可能波動的附加金額。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。',
+        text: '今日市值（為正數時），加上一個反映日後可能波動的附加金額。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。原因是每一檔限制的是到那時仍未到期的風險：O/N 檔包含所有對沖，3M 檔只包含過了 1M 檔仍未到期的對沖。各檔顯示的是同一個金額，是同一份風險分別對照幾條額度，不是加起來。期限越長風險越大，所以額度通常隨期限遞減。',
         calcs: [
+          '3M 掉期：計入 O/N、1W、1M、3M；不計入 6M、1Y',
           '風險敞口 = max(市值, 0) + 名義本金 × 附加因子 %',
           '有終止淨額結算：max(Σ 市值, 0) + (0.4 + 0.6 × NGR) × Σ 附加金額',
           'NGR = max(Σ 市值, 0) ÷ Σ max(市值, 0)',
