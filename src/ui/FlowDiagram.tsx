@@ -2,7 +2,8 @@ import { useLang, type Lang } from './i18n';
 
 // Two flowcharts of the hedging flow, drawn on one shared geometry so they can
 // be compared side by side. Shape carries the node type: oval for start and end,
-// rectangle for a step, diamond for a decision. The accent marks what is new.
+// rectangle for a step, diamond for a decision. The box beside the check is where
+// the limits come from. The accent marks what is new.
 
 const INK = '#30343a';
 const MUTED = '#676d76';
@@ -19,10 +20,12 @@ const X = CX - W / 2;
 const H = 48; // node height
 const Y = { start: 24, external: 144, check: 224, ask: 296, pick: 368, accepts: 488, filled: 568, daily: 648 };
 const LOOP_X = 396; // channel the "not accepted" path runs back up
+const SIDE = { x: 288, w: 148 }; // where the limits come from, beside the check they feed
 
 interface Copy {
   title: string;
   desc: string;
+  source: [string, string]; // where the limits come from
   check: [string, string];
   ask: [string, string];
   pick: [string, string?];
@@ -49,8 +52,9 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
   en: {
     draft: {
       title: 'First draft of the hedging flow',
-      desc: 'Flowchart: an external hedge is checked against a limit kept per LP, prices are requested, the best LP is picked, and on a fill the trade size comes off the limit.',
-      check: ['Check the limit', 'per LP; a trader can edit it'],
+      desc: 'Flowchart: a limit per LP arrives by a daily feed and a trader can edit it by hand. An external hedge is checked against it, prices are requested, the best LP is picked, and on a fill the trade size comes off the limit.',
+      source: ['Limit per LP', 'daily feed, hand edits'],
+      check: ['Check the limit', 'trade size against one number'],
       ask: ['Ask LPs with limit', '360T stream · FXGO quote'],
       pick: ['Pick the best single LP'],
       loop: 'NO: NEXT BEST',
@@ -58,20 +62,22 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
     },
     proposed: {
       title: 'Proposed hedging flow',
-      desc: 'Flowchart: an external hedge gets an initial check on both risk measures per banking group, the picked LP is checked again and its room reserved, a rejection releases the reservation, a fill turns it into usage, and open hedges are revalued each day.',
-      check: ['Initial check', 'both risk measures, per group'],
+      desc: 'Flowchart: lines per banking group are keyed in by a trader each day and every change is recorded. An external hedge gets an initial check on every measure, the picked LP is checked again and its room reserved, a rejection releases the reservation, a fill turns it into usage, and each day open hedges are revalued and a report is drawn at the close.',
+      source: ['Lines per group', 'keyed in daily, recorded'],
+      check: ['Initial check', 'every measure, per group'],
       ask: ['Ask LPs that fit', '360T stream · FXGO quote'],
       pick: ['Pick best LP and reserve', 'checked again, in one step'],
       loop: 'RELEASE, NEXT',
       filled: ['Filled', 'reservation becomes usage'],
-      daily: ['Each day', 'revalue what is still open'],
+      daily: ['Each day', 'revalue open hedges, report at close'],
     },
   },
   zh: {
     draft: {
       title: '對沖流程初稿',
-      desc: '流程圖：對外對沖先對照按 LP 記錄的額度，再詢價、選出最佳 LP，成交後從額度扣除交易金額。',
-      check: ['檢查額度', '按 LP 記錄，交易員可修改'],
+      desc: '流程圖：每個 LP 的額度每日由系統傳入，交易員可以手改。對外對沖先對照這個額度，再詢價、選出最佳 LP，成交後從額度扣除交易金額。',
+      source: ['每個 LP 的額度', '每日傳入，可手改'],
+      check: ['檢查額度', '交易金額對一個數字'],
       ask: ['向有額度的 LP 詢價', '360T 串流報價 · FXGO 詢價'],
       pick: ['選出最佳的單一 LP'],
       loop: '否：下一家',
@@ -79,13 +85,14 @@ const COPY: Record<Lang, Record<'draft' | 'proposed', Copy>> = {
     },
     proposed: {
       title: '建議的對沖流程',
-      desc: '流程圖：對外對沖先按銀行集團對兩種風險做初步檢查；選定 LP 後再檢查一次並預佔額度；被拒即釋放；成交後預佔轉為已用額度；未到期的對沖每日重估。',
-      check: ['初步檢查', '兩種風險，按銀行集團'],
+      desc: '流程圖：各銀行集團的額度由交易員每日輸入，每次改動都有記錄。對外對沖先按銀行集團對每項指標做初步檢查；選定 LP 後再檢查一次並預佔額度；被拒即釋放；成交後預佔轉為已用額度；每日重估未到期的對沖，日終出報表。',
+      source: ['每個集團的額度', '每日人工輸入，有記錄'],
+      check: ['初步檢查', '每項指標，按銀行集團'],
       ask: ['向放得進的 LP 詢價', '360T 串流報價 · FXGO 詢價'],
       pick: ['選最佳 LP 並預佔額度', '再檢查一次，一步完成'],
       loop: '釋放，下一家',
       filled: ['成交', '預佔轉為已用額度'],
-      daily: ['每日', '重估未到期的對沖'],
+      daily: ['每日', '重估未到期的對沖，日終出報表'],
     },
   },
 };
@@ -106,6 +113,23 @@ function StepBox({ y, name, sub, focal }: { y: number; name: string; sub?: strin
           {sub}
         </text>
       )}
+    </>
+  );
+}
+
+/** A box off the main path: something the step beside it reads. */
+function SideBox({ y, name, sub, focal }: { y: number; name: string; sub: string; focal?: boolean }) {
+  const cx = SIDE.x + SIDE.w / 2;
+  return (
+    <>
+      <rect x={SIDE.x} y={y} width={SIDE.w} height={H} rx={6} fill={PAPER} />
+      <rect x={SIDE.x} y={y} width={SIDE.w} height={H} rx={6} fill={focal ? TINT : SOFT_FILL} stroke={focal ? ACCENT : SOFT_STROKE} strokeWidth={1} />
+      <text x={cx} y={y + 21} {...nameText}>
+        {name}
+      </text>
+      <text x={cx} y={y + 38} {...subText}>
+        {sub}
+      </text>
     </>
   );
 }
@@ -169,6 +193,7 @@ export function FlowDiagram({ variant }: { variant: 'draft' | 'proposed' }) {
         {down(Y.start + H, Y.external - 48)}
         <line x1={CX + 100} y1={Y.external} x2={304} y2={Y.external} {...line} />
         {down(Y.external + 48, Y.check)}
+        <line x1={SIDE.x} y1={Y.check + H / 2} x2={X + W} y2={Y.check + H / 2} {...line} />
         {down(Y.check + H, Y.ask)}
         {down(Y.ask + H, Y.pick)}
         {down(Y.pick + H, Y.accepts - 48)}
@@ -189,6 +214,7 @@ export function FlowDiagram({ variant }: { variant: 'draft' | 'proposed' }) {
         <Diamond cy={Y.external} name={s.external} />
         <Oval x={304} y={Y.external - 24} w={120} name={s.noCheck} />
         <StepBox y={Y.check} name={c.check[0]} sub={c.check[1]} />
+        <SideBox y={Y.check} name={c.source[0]} sub={c.source[1]} focal={proposed} />
         <StepBox y={Y.ask} name={c.ask[0]} sub={c.ask[1]} />
         <StepBox y={Y.pick} name={c.pick[0]} sub={c.pick[1]} focal={proposed} />
         <Diamond cy={Y.accepts} name={s.accepts} />

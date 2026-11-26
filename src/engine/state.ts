@@ -1,15 +1,15 @@
-import { OUTRIGHT_TENORS, PAIRS, SWAP_TENORS, isWeekend, nextWeekday, valueDates } from './calendar';
+import { OUTRIGHT_TENORS, PAIRS, PILLARS, SWAP_TENORS, isWeekend, nextWeekday, valueDates } from './calendar';
 import { CHANNELS, checksBook, openOn } from './channels';
 import { defaultState } from './defaults';
 import { checkTrade, groupOf } from './lines';
 import { usdPerUnit } from './market';
 import { makeCtx, type Ctx } from './risk';
-import type { AppState, Channel, ISODate, Ticket, Trade } from './types';
+import type { AppState, Channel, Group, ISODate, Ticket, Trade } from './types';
 
 export const MAX_AMOUNT_USD = 50_000_000;
 
 /** Why a ticket cannot be dealt. The screen turns the code into words. */
-export type TicketError = 'USE_SWAP_OR_FORWARD' | 'NDF_ONLY' | 'TENOR' | 'AMOUNT' | 'TOO_LARGE' | 'NO_TOM_NEXT' | 'NOT_CLS_PAIR' | 'BOOK_PRODUCT' | 'BOOK_EMPTY';
+export type TicketError = 'USE_SWAP_OR_FORWARD' | 'NDF_ONLY' | 'TENOR' | 'AMOUNT' | 'TOO_LARGE' | 'NO_TOM_NEXT' | 'NOT_CLS_PAIR' | 'BOOK_PRODUCT' | 'BOOK_EMPTY' | 'LP_OFF_LIST';
 
 /** Turn a ticket into a trade dealt at today's mid rates, or say why it cannot be dealt. */
 export function buildTrade(ctx: Ctx, ticket: Ticket): Trade | { error: TicketError } {
@@ -67,7 +67,8 @@ export function candidates(ctx: Ctx, s: AppState, ticket: Ticket): Trade[] | { e
   const built = buildTrade(ctx, ticket);
   if ('error' in built) return built;
   const book = bookOf(s, ticket);
-  if (!book) return [built];
+  // The counterparty list decides who the desk may send a hedge to. On a book the desk cannot choose, so the list does not apply there.
+  if (!book) return s.blocked.includes(ticket.lpId) ? { error: 'LP_OFF_LIST' } : [built];
   const only = CHANNELS[book].only;
   if (only && ticket.product !== only) return { error: 'BOOK_PRODUCT' };
   const lps = openOn(s, book);
@@ -94,6 +95,15 @@ export function largestThatFits(ctx: Ctx, s: AppState, ticket: Ticket): number {
   return Math.floor(lo / 1000 + 1e-6) * 1000;
 }
 
+/** The lines a trader keeps on the limit management page, by the name each has in the change record. */
+export const NOTIONAL_LINE = 'NOTIONAL';
+export const SR_LINE = 'SR';
+export const psrLine = (pillar: number) => `PSR ${PILLARS[pillar]}`;
+
+const readLine = (g: Group, line: string) => (line === SR_LINE ? g.srLine : line === NOTIONAL_LINE ? g.notionalLine : g.psrLines[PILLARS.findIndex((_, p) => psrLine(p) === line)]);
+const writeLine = (g: Group, line: string, value: number): Group =>
+  line === SR_LINE ? { ...g, srLine: value } : line === NOTIONAL_LINE ? { ...g, notionalLine: value } : { ...g, psrLines: g.psrLines.map((x, p) => (psrLine(p) === line ? value : x)) };
+
 export type Action =
   | { type: 'SEND'; ticket: Ticket }
   | { type: 'FILL'; id: string }
@@ -101,6 +111,8 @@ export type Action =
   | { type: 'BOOK_FILL'; ticket: Ticket; lpId: string }
   | { type: 'SWITCH_ON_CHANNEL'; lpId: string; on: boolean }
   | { type: 'SWITCH_BOOK_CHECK'; channel: Channel; on: boolean }
+  | { type: 'SET_LINE'; groupId: string; line: string; value: number }
+  | { type: 'LIST_LP'; lpId: string; on: boolean }
   | { type: 'NEXT_DAY' }
   | { type: 'GO_TO'; date: ISODate }
   | { type: 'RESET' }
@@ -171,6 +183,26 @@ export function reducer(s: AppState, a: Action): AppState {
       const off = s.channelOff.filter((id) => id !== a.lpId);
       return { ...s, channelOff: a.on ? off : [...off, a.lpId] };
     }
+    case 'SET_LINE': {
+      // A trader keys the lines in by hand, so every change is recorded: the day, the line, the old figure and the new one.
+      const group = s.groups.find((g) => g.id === a.groupId);
+      const from = group && readLine(group, a.line);
+      if (!group || from === undefined || !(a.value >= 0) || a.value === from) return s;
+      const groups = s.groups.map((g) => (g === group ? writeLine(g, a.line, a.value) : g));
+      // Typing a figure reports each keystroke. Changes to one line on one day are kept as a single entry, from the
+      // figure the day started with to the last one typed, and dropped if that is the same figure.
+      const last = s.limitLog[s.limitLog.length - 1];
+      const same = last !== undefined && last.date === s.businessDate && last.groupId === a.groupId && last.line === a.line;
+      const entry = { date: s.businessDate, groupId: a.groupId, line: a.line, from: same ? last.from : from, to: a.value };
+      const kept = same ? s.limitLog.slice(0, -1) : s.limitLog;
+      return { ...s, groups, limitLog: entry.from === entry.to ? kept : [...kept, entry] };
+    }
+    case 'LIST_LP': {
+      const lp = s.lps.find((l) => l.id === a.lpId);
+      if (!lp || CHANNELS[lp.channel].disclosed !== 'BEFORE') return s;
+      const blocked = s.blocked.filter((id) => id !== a.lpId);
+      return { ...s, blocked: a.on ? blocked : [...blocked, a.lpId] };
+    }
     case 'NEXT_DAY':
       return goTo(s, nextWeekday(s.businessDate));
     case 'GO_TO': {
@@ -189,14 +221,15 @@ export function reducer(s: AppState, a: Action): AppState {
   }
 }
 
-const STORAGE_KEY = 'fx-credit-line-simulator/v4';
+const STORAGE_KEY = 'fx-credit-line-simulator/v5';
 
 export function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as AppState;
-      if (s.businessDate && s.market?.pairs && Array.isArray(s.trades) && Array.isArray(s.groups) && Array.isArray(s.channelOff) && Array.isArray(s.bookCheckOff)) return s;
+      const lists = [s.trades, s.groups, s.channelOff, s.bookCheckOff, s.blocked, s.limitLog];
+      if (s.businessDate && s.market?.pairs && lists.every(Array.isArray) && typeof s.warnPct === 'number' && typeof s.offsetNegativeMv === 'boolean') return s;
     }
   } catch {
     // Unreadable or unavailable storage: start fresh.

@@ -4,17 +4,17 @@ import { useLang } from './i18n';
 const T = {
   en: {
     names: ['In use', 'Reserved', 'This hedge'],
-    label: (k: string, a: string, l: string, over: boolean) => `${k}: ${a} of ${l} USD mio${over ? ', over the line' : ''}`,
+    label: (k: string, a: string, l: string, over: boolean, warn: boolean) => `${k}: ${a} of ${l} USD mio${over ? ', over the line' : warn ? ', at the warning level' : ''}`,
   },
   zh: {
     names: ['已用', '預佔', '本筆'],
-    label: (k: string, a: string, l: string, over: boolean) => `${k}：${a} / ${l} 百萬美元${over ? '，超出額度' : ''}`,
+    label: (k: string, a: string, l: string, over: boolean, warn: boolean) => `${k}：${a} / ${l} 百萬美元${over ? '，超出額度' : warn ? '，達到預警線' : ''}`,
   },
 };
 const SEGMENTS = ['seg-used', 'seg-reserved', 'seg-hedge'] as const;
 
 /** One credit line as a bar: filled hedges, reservations and, when given, the hedge on the ticket. */
-export function LineBar(p: { label: string; line: number; parts: number[]; total: number; ok: boolean; dense?: boolean }) {
+export function LineBar(p: { label: string; line: number; parts: number[]; total: number; ok: boolean; warn?: boolean; dense?: boolean }) {
   const t = T[useLang()];
   const parts = p.parts.map((v, i) => ({ v, cls: SEGMENTS[i], name: t.names[i] })).filter((x) => x.v > 0.5);
   const total = Math.max(p.total, 0);
@@ -23,7 +23,7 @@ export function LineBar(p: { label: string; line: number; parts: number[]; total
   const scale = sum > 0 ? total / sum : 0;
   const full = Math.max(p.line, total);
   return (
-    <div className={`bar${p.dense ? ' bar-dense' : ''}${p.ok ? '' : ' bar-over'}`} role="img" aria-label={t.label(p.label, mio(total), mio(p.line), !p.ok)}>
+    <div className={`bar${p.dense ? ' bar-dense' : ''}${!p.ok ? ' bar-over' : p.warn ? ' bar-warn' : ''}`} role="img" aria-label={t.label(p.label, mio(total), mio(p.line), !p.ok, !!p.warn)}>
       {full > 0 && parts.map((x) => <span key={x.cls} className={`seg ${x.cls}`} style={{ width: `${((x.v * scale) / full) * 100}%` }} title={`${x.name}: ${mio(x.v)}`} />)}
     </div>
   );

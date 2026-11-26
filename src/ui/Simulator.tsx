@@ -1,13 +1,13 @@
 import { useMemo, useState, type Dispatch } from 'react';
 import { OUTRIGHT_TENORS, PAIRS, PAIR_IDS, PILLARS, SWAP_TENORS } from '../engine/calendar';
 import { CHANNELS, checksBook } from '../engine/channels';
-import { board, checkTrade, groupOf, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
+import { NOTIONAL_CHANNEL, board, checkTrade, groupOf, lineStatus, type BoardRow, type CheckResult, type CheckRow } from '../engine/lines';
 import { makeCtx, valueTrade, type Ctx } from '../engine/risk';
 import { usdPerUnit } from '../engine/market';
-import { MAX_AMOUNT_USD, bookOf, buildTrade, candidates, largestThatFits, type Action, type TicketError } from '../engine/state';
+import { MAX_AMOUNT_USD, NOTIONAL_LINE, SR_LINE, bookOf, buildTrade, candidates, largestThatFits, psrLine, type Action, type TicketError } from '../engine/state';
 import type { AppState, Channel, Group, PairId, Product, RateTenor, Tenor, Ticket, Trade } from '../engine/types';
 import { NumInput, Status } from './bits';
-import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, direction, mio, num, partyName, rate, shortDay, signedMio } from './format';
+import { PRODUCT_LABEL, SETTLEMENT_LABEL, amt, day, direction, mio, num, partyName, rate, shortDay, signedMio } from './format';
 import { useLang, type Lang } from './i18n';
 import { BarLegend, LineBar } from './LineBar';
 import { Workings } from './Workings';
@@ -33,6 +33,7 @@ const T = {
     bookGroup: 'A channel that names the counterparty after the trade. A tick means every counterparty there has room for this order.',
     hasRoom: ', has room',
     noRoom: ', no room',
+    offList: ', off the counterparty list',
     idle: (g: string) => `These are ${g}'s lines as they stand. Enter an amount to see how much this hedge would use, and whether it fits.`,
     idleBook: (ch: string) => `These are the lines of every counterparty on ${ch} as they stand. Enter an amount to see whether the order fits each of them.`,
     fits: 'Fits',
@@ -41,6 +42,12 @@ const T = {
       `Adds USD ${psr} mio of pre-settlement risk${sr ? ` and up to ${sr} mio of settlement risk a day` : ''} to ${g}.`,
     psrOver: (k: string, a: string, l: string) => `Pre-settlement risk at ${k} would reach ${a} against a line of ${l}.`,
     srOver: (d: string, a: string, l: string) => `Settlement risk on ${d} would reach ${a} against a line of ${l}.`,
+    notionalOver: (a: string, l: string) => `Gross notional on 360T today would reach ${a} against a line of ${l}.`,
+    warned: (what: string, used: string, level: number) => ` Warning: ${what} would be ${used}% used, past the warning level of ${level}%.`,
+    warnPsr: (k: string) => `the ${k} pre-settlement line`,
+    warnSr: (d: string) => `the settlement line on ${d}`,
+    warnNotional: 'the 360T notional line',
+    warnNote: (level: number) => `! marks a line at or past the warning level of ${level}%.`,
     onlyReservation: ' On its own this hedge would fit. Another hedge has been sent and has no answer yet, so its room is still held. If that one is rejected, this one fits.',
     bookFits: 'Every counterparty has room',
     bookBlocked: (g: string) => `No room with ${g}`,
@@ -60,6 +67,7 @@ const T = {
     psr: 'Pre-settlement risk',
     pillarWhy: (to: string) => `This hedge matures in the ${to} pillar, so it counts there and in every shorter one. Each line caps the risk still open at that point; it is the same amount against each line, not added up.`,
     sr: 'Settlement risk',
+    notional: 'Gross notional on 360T, dealt today',
     unit: 'USD mio',
     of: (a: string, l: string) => `${a} of ${l}`,
     overBy: (x: string) => `over by ${x}`,
@@ -71,6 +79,7 @@ const T = {
     figHead: ['USD mio', 'Credit line', 'Earlier days', 'Initial today', 'Today’s fills', 'Reserved', 'This hedge', 'Headroom after'],
     psrRow: (k: string) => `PSR ${k}`,
     srRow: (k: string) => `SR ${k}`,
+    notionalRow: 'Notional 360T',
     sent: 'Sent hedges',
     sentHead: ['Hedge', 'Status', 'Exposure, USD'],
     status: { IN_FLIGHT: 'In flight', FILLED: 'Filled', REJECTED: 'Rejected', UNFILLED: 'Not filled', EXPIRED: 'Lapsed', SETTLED: 'Settled' },
@@ -85,13 +94,24 @@ const T = {
     points: 'Swap points, pips',
     spot: 'Spot',
     usdRate: 'USD rate, %',
-    lines: 'Credit lines and add-ons, set by the credit owner',
+    lines: 'Limit management: lines keyed in by a trader, add-ons and the counterparty list',
+    linesHint: 'The department splits each counterparty’s limit. A trader keys the day’s lines in here, and every change is recorded below. Exposure is measured gross at this stage, so both kinds of netting start switched off.',
     psrLine: (p: string) => `PSR ${p}`,
     srLine: 'SR per day',
+    notionalLine: '360T notional per day',
+    notionalHead: 'Notional 360T',
+    noLp: 'no LP there',
     closeOut: 'Close-out netting',
     payNet: 'Payment netting',
     addOn: 'Add-on, %',
-    offset: 'Let a negative market value reduce the add-on. This is an internal variant; the standard method keeps the add-on in full.',
+    warnAt: 'Warn when a line is this full, %',
+    offset: 'Keep the add-on in full when the market value is negative: max(market value, 0) + add-on. This is the Basel standard method. Unticked, the limit system’s method applies: max(market value + add-on, 0).',
+    changes: 'Changes recorded',
+    noChanges: 'No line has been changed.',
+    changeHead: ['Date', 'Banking group', 'Line', 'From', 'To'],
+    parties: 'Counterparty list',
+    partiesHint: 'Each LP on a channel maps to a counterparty, and each counterparty to the banking group (root parent) that holds the lines. An LP taken off the list is sent no hedge. On a channel that names the counterparty after the trade the desk cannot choose, so the list does not apply there.',
+    partyHead: ['LP on the channel', 'Channel', 'Banking group', 'On the list'],
     books: 'Channels that name the counterparty after the trade',
     booksHint:
       'An order there is checked against every counterparty switched on at the channel, and reserved on each. The desk cannot keep one counterparty out from its own side. Switching one off means whoever administers credit at the channel sets its limit there to zero; a tick removed below stands for that having been done. With the check off, the desk relies on the channel’s limits alone and books fills afterwards.',
@@ -107,6 +127,7 @@ const T = {
       NOT_CLS_PAIR: (p: string) => `${p} cannot settle through CLS.`,
       BOOK_PRODUCT: () => 'This channel takes one product here: NDFs on EBS Market, swaps on LSEG Forwards Matching.',
       BOOK_EMPTY: () => 'No counterparty is switched on at this channel.',
+      LP_OFF_LIST: () => 'This LP is off the counterparty list, so no hedge is sent to it. The list is under Limit management below.',
     } as Record<TicketError, (pair: string, max: string) => string>,
   },
   zh: {
@@ -123,6 +144,7 @@ const T = {
     bookGroup: '成交後才披露對手的場地。打勾代表場地上每個對手都有足夠額度。',
     hasRoom: '，額度足夠',
     noRoom: '，額度不足',
+    offList: '，不在交易對手清單上',
     idle: (g: string) => `下面是 ${g}現在的額度。輸入金額，看這筆對沖要用多少、放不放得下。`,
     idleBook: (ch: string) => `下面是 ${ch} 上每個對手現在的額度。輸入金額，看這張訂單在每個對手那裡放不放得下。`,
     fits: '額度足夠',
@@ -130,6 +152,12 @@ const T = {
     adds: (psr: string, sr: string | null, g: string) => `${g}的交割前風險增加 ${psr} 百萬美元${sr ? `，結算風險每日最多增加 ${sr} 百萬美元` : ''}。`,
     psrOver: (k: string, a: string, l: string) => `${k} 期限檔的交割前風險將達 ${a}，額度只有 ${l}。`,
     srOver: (d: string, a: string, l: string) => `${d} 的結算風險將達 ${a}，額度只有 ${l}。`,
+    notionalOver: (a: string, l: string) => `今日在 360T 的名義金額總額將達 ${a}，額度只有 ${l}。`,
+    warned: (what: string, used: string, level: number) => `預警：${what}將用到 ${used}%，超過預警線 ${level}%。`,
+    warnPsr: (k: string) => `${k} 檔的交割前額度`,
+    warnSr: (d: string) => `${d} 的結算額度`,
+    warnNotional: '360T 的名義金額額度',
+    warnNote: (level: number) => `「!」代表這條額度已用到預警線 ${level}% 或以上。`,
     onlyReservation: '這筆單獨放得進。但另一筆已經送出、還沒有結果，它的額度先留著。那一筆被拒絕的話，這筆就放得進。',
     bookFits: '每個對手都放得下',
     bookBlocked: (g: string) => `${g}的額度不夠`,
@@ -148,6 +176,7 @@ const T = {
     psr: '交割前風險',
     pillarWhy: (to: string) => `這筆對沖在 ${to} 檔到期，所以計入 ${to} 檔和所有更短的期限檔。每一檔限制的是到那時仍未到期的風險；各檔是同一個金額分別對照，不是加起來。`,
     sr: '結算風險',
+    notional: '360T 名義金額總額（當日成交）',
     unit: '百萬美元',
     of: (a: string, l: string) => `${a} / ${l}`,
     overBy: (x: string) => `超出 ${x}`,
@@ -159,6 +188,7 @@ const T = {
     figHead: ['百萬美元', '授信額度', '往日交易', '今日初始額度', '今日成交', '預佔', '本筆', '交易後可用額度'],
     psrRow: (k: string) => `交割前 ${k}`,
     srRow: (k: string) => `結算 ${k}`,
+    notionalRow: '名義金額 360T',
     sent: '已送出的對沖',
     sentHead: ['對沖', '狀態', '風險敞口（美元）'],
     status: { IN_FLIGHT: '在途', FILLED: '已成交', REJECTED: '已拒絕', UNFILLED: '沒有成交', EXPIRED: '已失效', SETTLED: '已交收' },
@@ -173,13 +203,24 @@ const T = {
     points: '掉期點（點）',
     spot: '即期',
     usdRate: '美元利率 %',
-    lines: '授信額度與附加因子（由授信管理部門設定）',
+    lines: '額度管理：交易員每日維護的額度、附加因子和交易對手清單',
+    linesHint: '各對手的額度由部門切分，交易員每日在這裡輸入。每次改動都記錄在下面。現階段按未淨額計，所以兩種淨額結算預設都是關的。',
     psrLine: (p: string) => `交割前 ${p}`,
     srLine: '結算（每日）',
+    notionalLine: '360T 名義金額（每日）',
+    notionalHead: '名義金額 360T',
+    noLp: '沒有 LP',
     closeOut: '終止淨額結算',
     payNet: '支付淨額結算',
     addOn: '附加因子 %',
-    offset: '負市值可減少附加金額。這是內部做法；標準方法保留全部附加金額。',
+    warnAt: '預警線：額度用到這個百分比就提示',
+    offset: '市值為負時保留全部附加金額：max(市值, 0) + 附加金額。這是巴塞爾的標準方法。不勾選就用額度系統的做法：max(市值 + 附加金額, 0)。',
+    changes: '變更記錄',
+    noChanges: '沒有改過任何額度。',
+    changeHead: ['日期', '銀行集團', '額度', '原來', '改為'],
+    parties: '交易對手清單',
+    partiesHint: '渠道上的每個 LP 對應一個交易對手，每個交易對手對應持有額度的銀行集團（root parent）。從清單剔除的 LP 不會收到對沖。事後披露的場地上交易台不能選對手，所以這張清單在那裡不適用。',
+    partyHead: ['渠道上的 LP', '渠道', '銀行集團', '在清單上'],
     books: '事後披露的場地',
     booksHint: '掛到這類場地的訂單，會對場地上每個開通的對手檢查並預佔。交易台不能從自己這邊單獨擋住一個對手。停用對手，是管理場地額度的人在場地上把它的限額設為零；下面取消勾選，代表他們已經改了。關掉檢查的話，交易台只靠場地的限額，成交後才記帳。',
     bookCheck: '掛單前對每個對手檢查並預佔',
@@ -194,6 +235,7 @@ const T = {
       NOT_CLS_PAIR: (p: string) => `${p} 不能經 CLS 交收。`,
       BOOK_PRODUCT: () => '這個場地在本程式只做一種產品：EBS Market 做 NDF，LSEG Forwards Matching 做掉期。',
       BOOK_EMPTY: () => '這個場地上沒有開通的對手。',
+      LP_OFF_LIST: () => '這個 LP 不在交易對手清單上，不能向它送出對沖。清單在下面的「額度管理」裡。',
     } as Record<TicketError, (pair: string, max: string) => string>,
   },
 };
@@ -228,17 +270,19 @@ interface LineRow {
   hedge: number; // this ticket
   after: number;
   ok: boolean;
+  warn: boolean; // within the line, but at or past the warning level
 }
 
 interface GroupRows {
   psr: LineRow[];
   sr: LineRow[];
+  notional?: LineRow; // gross notional dealt today on 360T, when the group has an LP there
 }
 
 /** One counterparty an order on a book could fill with: its lines, and the check once the ticket has an amount. */
 type BookView = GroupRows & { group: Group; check?: CheckResult };
 
-function lineRows(keys: string[], label: (k: string) => string, line: (i: number) => number, b: BoardRow[], c?: CheckRow[]): LineRow[] {
+function lineRows(warnPct: number, keys: string[], label: (k: string) => string, line: (i: number) => number, b: BoardRow[], c?: CheckRow[]): LineRow[] {
   return keys.map((key, i) => {
     const br = b.find((r) => r.key === key);
     const cr = c?.find((r) => r.key === key);
@@ -254,6 +298,7 @@ function lineRows(keys: string[], label: (k: string) => string, line: (i: number
       hedge: cr ? cr.after - cr.before : 0,
       after,
       ok: cr ? cr.ok : after <= line(i) + 0.5,
+      warn: lineStatus(after, line(i), warnPct) === 'WARN',
     };
   });
 }
@@ -278,34 +323,39 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
     dispatch(a);
     setTicket({ ...ticket, amount: 0 });
   };
-  const fits = (to: Partial<Ticket>) => {
+  /** Whether a ticket changed this way could be sent: true, false with the reason for a screen reader, or null when the ticket itself is wrong. */
+  const fits = (to: Partial<Ticket>): { ok: boolean; why: string } | null => {
     const other = candidates(ctx, state, { ...ticket, ...to });
-    return 'error' in other ? null : other.every((x) => checkTrade(ctx, state, x).ok);
+    if ('error' in other) return other.error === 'LP_OFF_LIST' ? { ok: false, why: t.offList } : null;
+    const ok = other.every((x) => checkTrade(ctx, state, x).ok);
+    return { ok, why: ok ? t.hasRoom : t.noRoom };
   };
-  const chip = (key: string, label: string, pressed: boolean, ok: boolean | null, onClick: () => void) => (
+  const chip = (key: string, label: string, pressed: boolean, mark: { ok: boolean; why: string } | null, onClick: () => void) => (
     <button key={key} type="button" className="chip" aria-pressed={pressed} onClick={onClick}>
-      {ok !== null && (
-        <span className={ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
-          {ok ? '✓' : '✕'}
+      {mark && (
+        <span className={mark.ok ? 'mark-ok' : 'mark-bad'} aria-hidden="true">
+          {mark.ok ? '✓' : '✕'}
         </span>
       )}
       {label}
-      <span className="sr-only">{ok === null ? '' : ok ? t.hasRoom : t.noRoom}</span>
+      <span className="sr-only">{mark?.why}</span>
     </button>
   );
-  const rowsFor = (group: Group, c?: CheckResult): GroupRows => {
+  const rowsFor = (group: Group, c?: CheckResult, onNotional = false): GroupRows => {
     const b = board(ctx, state, group.id);
     const srKeys = [...new Set([...b.sr.map((r) => r.key), ...(c?.sr.map((r) => r.key) ?? [])])].sort();
     return {
-      psr: lineRows([...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, c?.psr),
-      sr: lineRows(srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, c?.sr),
+      psr: lineRows(state.warnPct, [...PILLARS], (k) => k, (i) => group.psrLines[i], b.psr, c?.psr),
+      sr: lineRows(state.warnPct, srKeys, (k) => shortDay(k, lang), () => group.srLine, b.sr, c?.sr),
+      // Only a hedge sent on 360T counts against this line, so it shows only for an LP there.
+      notional: onNotional && b.notional ? lineRows(state.warnPct, [NOTIONAL_CHANNEL], (k) => k, () => group.notionalLine, [b.notional], c?.notional && [c.notional])[0] : undefined,
     };
   };
 
   const check = checks[0];
   const group = groupOf(state, ticket.lpId);
   const groupName = partyName(group.name, lang);
-  const { psr, sr } = rowsFor(group, book ? undefined : check);
+  const { psr, sr, notional } = rowsFor(group, book ? undefined : check, !book && state.lps.find((l) => l.id === ticket.lpId)!.channel === NOTIONAL_CHANNEL);
 
   return (
     <>
@@ -354,7 +404,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
             ) : idle ? (
               <Idle text={t.idle(groupName)} action={t.send} />
             ) : (
-              <Verdict trade={check.trade} check={check} onSend={() => send({ type: 'SEND', ticket })} />
+              <Verdict trade={check.trade} check={check} warnPct={state.warnPct} onSend={() => send({ type: 'SEND', ticket })} />
             )}
 
             <LineBars title={t.psr} group={groupName} rows={psr} legend withHedge={!!check} />
@@ -369,6 +419,8 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
                 {check?.trade.settlement === 'CASH' && t.viaCash}
               </p>
             )}
+            {notional && <LineBars title={t.notional} group={groupName} rows={[notional]} />}
+            {[...psr, ...sr, ...(notional ? [notional] : [])].some((r) => r.ok && r.warn) && <p className="quiet pillar-why">{t.warnNote(state.warnPct)}</p>}
 
             {check && (
               <details className="more">
@@ -378,7 +430,7 @@ export function Simulator({ state, dispatch }: { state: AppState; dispatch: Disp
             )}
             <details className="more">
               <summary>{t.figures(groupName)}</summary>
-              <FiguresTable psr={psr} sr={sr} />
+              <FiguresTable psr={psr} sr={sr} notional={notional} />
             </details>
           </>
         )}
@@ -476,7 +528,7 @@ function Idle({ text, action }: { text: string; action?: string }) {
   );
 }
 
-function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; onSend: () => void }) {
+function Verdict({ trade, check, warnPct, onSend }: { trade: Trade; check: CheckResult; warnPct: number; onSend: () => void }) {
   const lang = useLang();
   const t = T[lang];
   const far = trade.legs[trade.legs.length - 1];
@@ -490,7 +542,17 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
     ? t.adds(mio(check.risk.exposure), srAdded > 0.5 ? mio(srAdded) : null, g)
     : psrFail
       ? t.psrOver(psrFail.key, mio(psrFail.after), mio(psrFail.line))
-      : t.srOver(shortDay(srFail!.key, lang), mio(srFail!.after), mio(srFail!.line));
+      : srFail
+        ? t.srOver(shortDay(srFail.key, lang), mio(srFail.after), mio(srFail.line))
+        : t.notionalOver(mio(check.notional!.after), mio(check.notional!.line));
+  // Of the lines this hedge adds to, the fullest one that passes the warning level.
+  const fullest = [
+    ...check.psr.map((r) => ({ r, what: t.warnPsr(r.key) })),
+    ...check.sr.map((r) => ({ r, what: t.warnSr(shortDay(r.key, lang)) })),
+    ...(check.notional ? [{ r: check.notional, what: t.warnNotional }] : []),
+  ]
+    .filter(({ r }) => r.after > r.before + 0.5 && lineStatus(r.after, r.line, warnPct) === 'WARN')
+    .sort((a, b) => b.r.after / b.r.line - a.r.after / a.r.line)[0];
   return (
     <div className="verdict-row">
       <div>
@@ -500,6 +562,7 @@ function Verdict({ trade, check, onSend }: { trade: Trade; check: CheckResult; o
         <p className="verdict-why">
           {why}
           {check.blockedByReservation && t.onlyReservation}
+          {check.ok && fullest && t.warned(fullest.what, num((fullest.r.after / fullest.r.line) * 100, 0), warnPct)}
         </p>
         <p className="quiet">{t.at(dates, rates)}</p>
       </div>
@@ -626,16 +689,20 @@ function LineBars({ title, group, rows, legend, withHedge, wide }: { title: stri
       {rows.map((r) => (
         <div key={r.key} className={Math.abs(r.hedge) < 0.5 && r.after < 0.5 ? 'line-row line-idle' : 'line-row'}>
           <span className="line-label">{r.label}</span>
-          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.hedge]} total={r.after} ok={r.ok} />
-          <span className="line-figure">{r.ok ? t.of(mio(r.after), mio(r.line)) : <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status>}</span>
+          <LineBar label={r.label} line={r.line} parts={[r.used, r.reserved, r.hedge]} total={r.after} ok={r.ok} warn={r.warn} />
+          <span className="line-figure">
+            {!r.ok ? <Status ok={false}>{t.overBy(mio(r.after - r.line))}</Status> : r.warn ? <Status ok warn>{t.of(mio(r.after), mio(r.line))}</Status> : t.of(mio(r.after), mio(r.line))}
+          </span>
         </div>
       ))}
     </div>
   );
 }
 
-function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
+function FiguresTable({ psr, sr, notional }: { psr: LineRow[]; sr: LineRow[]; notional?: LineRow }) {
   const t = T[useLang()];
+  const rows = [...psr, ...sr, ...(notional ? [notional] : [])];
+  const name = (r: LineRow, i: number) => (i < psr.length ? t.psrRow(r.label) : r === notional ? t.notionalRow : t.srRow(r.label));
   return (
     <div className="table-wrap">
       <table className="table">
@@ -647,9 +714,9 @@ function FiguresTable({ psr, sr }: { psr: LineRow[]; sr: LineRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {[...psr, ...sr].map((r, i) => (
-            <tr key={r.key} className={i === psr.length ? 'group-start' : undefined}>
-              <td>{i < psr.length ? t.psrRow(r.label) : t.srRow(r.label)}</td>
+          {rows.map((r, i) => (
+            <tr key={r.key} className={i === psr.length || r === notional ? 'group-start' : undefined}>
+              <td>{name(r, i)}</td>
               <td>{mio(r.line)}</td>
               <td>{mio(r.board?.earlier ?? 0)}</td>
               <td>{mio(r.board?.initial ?? r.line)}</td>
@@ -798,10 +865,16 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
   const lang = useLang();
   const t = T[lang];
   const edit = (change: (d: AppState) => void) => dispatch({ type: 'EDIT', change });
+  /** A line keyed in by the trader: the change goes on the record. */
+  const setLine = (groupId: string, line: string) => (v: number) => v >= 0 && dispatch({ type: 'SET_LINE', groupId, line, value: v * M });
   const name = (g: Group) => partyName(g.name, lang);
+  const groupName = (id: string) => name(state.groups.find((g) => g.id === id)!);
+  const lineName = (line: string) => (line === SR_LINE ? t.srLine : line === NOTIONAL_LINE ? t.notionalLine : t.psrLine(line.slice(4)));
+  const on360T = (g: Group) => state.lps.some((l) => l.groupId === g.id && l.channel === NOTIONAL_CHANNEL);
   return (
     <details className="more">
       <summary>{t.lines}</summary>
+      <p className="quiet hint">{t.linesHint}</p>
       <div className="table-wrap">
         <table className="table edit-table">
           <thead>
@@ -811,6 +884,7 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
                 <th key={p}>{t.psrLine(p)}</th>
               ))}
               <th>{t.srLine}</th>
+              <th>{t.notionalHead}</th>
               <th>{t.closeOut}</th>
               <th>{t.payNet}</th>
             </tr>
@@ -821,11 +895,18 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
                 <td>{name(g)}</td>
                 {PILLARS.map((p, pi) => (
                   <td key={p}>
-                    <NumInput label={`${name(g)} ${t.psrLine(p)}`} value={g.psrLines[pi] / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].psrLines[pi] = v * M))} />
+                    <NumInput label={`${name(g)} ${t.psrLine(p)}`} value={g.psrLines[pi] / M} min={0} onChange={setLine(g.id, psrLine(pi))} />
                   </td>
                 ))}
                 <td>
-                  <NumInput label={`${name(g)} ${t.srLine}`} value={g.srLine / M} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.groups[gi].srLine = v * M))} />
+                  <NumInput label={`${name(g)} ${t.srLine}`} value={g.srLine / M} min={0} onChange={setLine(g.id, SR_LINE)} />
+                </td>
+                <td>
+                  {on360T(g) ? (
+                    <NumInput label={`${name(g)} ${t.notionalLine}`} value={g.notionalLine / M} min={0} onChange={setLine(g.id, NOTIONAL_LINE)} />
+                  ) : (
+                    <span className="quiet-inline">{t.noLp}</span>
+                  )}
                 </td>
                 <td>
                   <input type="checkbox" aria-label={`${name(g)} ${t.closeOut}`} checked={g.closeOutNetting} onChange={(e) => edit((d) => void (d.groups[gi].closeOutNetting = e.target.checked))} />
@@ -842,15 +923,82 @@ function LinesEditor({ state, dispatch }: { state: AppState; dispatch: Dispatch<
                   <NumInput label={`${t.addOn} ${p}`} value={state.addOnPct[pi]} min={0} onChange={(v) => v >= 0 && edit((d) => void (d.addOnPct[pi] = v))} />
                 </td>
               ))}
-              <td colSpan={3} />
+              <td colSpan={4} />
             </tr>
           </tbody>
         </table>
       </div>
+      <label className="setting setting-number">
+        <NumInput label={t.warnAt} value={state.warnPct} min={0} onChange={(v) => v >= 0 && v <= 100 && edit((d) => void (d.warnPct = v))} />
+        <span>{t.warnAt}</span>
+      </label>
       <label className="setting">
-        <input type="checkbox" checked={state.offsetNegativeMv ?? false} onChange={(e) => edit((d) => void (d.offsetNegativeMv = e.target.checked))} />
+        <input type="checkbox" checked={!state.offsetNegativeMv} onChange={(e) => edit((d) => void (d.offsetNegativeMv = !e.target.checked))} />
         <span>{t.offset}</span>
       </label>
+
+      <h3 className="sub-title">{t.changes}</h3>
+      {state.limitLog.length === 0 ? (
+        <p className="quiet">{t.noChanges}</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table records">
+            <thead>
+              <tr>
+                {t.changeHead.map((h, i) => (
+                  <th key={h} className={i > 2 ? 'num' : undefined}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[...state.limitLog].reverse().map((c, i) => (
+                <tr key={i}>
+                  <td>{day(c.date, lang)}</td>
+                  <td>{groupName(c.groupId)}</td>
+                  <td>{lineName(c.line)}</td>
+                  <td className="num">{mio(c.from)}</td>
+                  <td className="num">{mio(c.to)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h3 className="sub-title">{t.parties}</h3>
+      <p className="quiet hint">{t.partiesHint}</p>
+      <div className="table-wrap">
+        <table className="table records">
+          <thead>
+            <tr>
+              {t.partyHead.map((h) => (
+                <th key={h}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state.lps
+              .filter((lp) => CHANNELS[lp.channel].disclosed === 'BEFORE')
+              .map((lp) => (
+                <tr key={lp.id}>
+                  <td>{partyName(lp.name, lang)}</td>
+                  <td>{CHANNELS[lp.channel].label}</td>
+                  <td>{groupName(lp.groupId)}</td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`${partyName(lp.name, lang)} ${CHANNELS[lp.channel].label} ${t.partyHead[3]}`}
+                      checked={!state.blocked.includes(lp.id)}
+                      onChange={(e) => dispatch({ type: 'LIST_LP', lpId: lp.id, on: e.target.checked })}
+                    />
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
     </details>
   );
 }

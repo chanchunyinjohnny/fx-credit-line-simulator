@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
-/** A pass or fail state: always an icon and words, never colour alone. */
-export function Status({ ok, children }: { ok: boolean; children: ReactNode }) {
+/** A pass, warning or fail state: always an icon and words, never colour alone. */
+export function Status({ ok, warn, children }: { ok: boolean; warn?: boolean; children: ReactNode }) {
   return (
-    <span className={ok ? 'status status-ok' : 'status status-bad'}>
-      <span aria-hidden="true">{ok ? '✓' : '✕'}</span> {children}
+    <span className={!ok ? 'status status-bad' : warn ? 'status status-warn' : 'status status-ok'}>
+      <span aria-hidden="true">{!ok ? '✕' : warn ? '!' : '✓'}</span> {children}
     </span>
   );
 }

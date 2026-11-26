@@ -12,13 +12,13 @@ export interface Ctx {
   curve(pair: PairId): FxCurve;
 }
 
-export function makeCtx(s: { businessDate: ISODate; market: MarketData; addOnPct: number[]; offsetNegativeMv?: boolean }): Ctx {
+export function makeCtx(s: { businessDate: ISODate; market: MarketData; addOnPct: number[]; offsetNegativeMv: boolean }): Ctx {
   const curves = new Map<PairId, FxCurve>();
   return {
     t0: s.businessDate,
     market: s.market,
     addOnPct: s.addOnPct,
-    offsetNegativeMv: s.offsetNegativeMv ?? false,
+    offsetNegativeMv: s.offsetNegativeMv,
     pillarEnds: pillarEnds(s.businessDate),
     curve(pair) {
       let c = curves.get(pair);
@@ -60,9 +60,10 @@ export interface TradeRisk {
 }
 
 /** Exposure from a market value and an add-on.
- *  Standard (current exposure method): max(mv, 0) + add-on. A trade that is out
- *  of the money can still turn positive, so its add-on is kept in full.
- *  Offset variant, used by some internal limit systems: max(mv + add-on, 0). */
+ *  The limit system's method, and the default here: max(mv + add-on, 0), so a
+ *  trade that is out of the money uses less than its add-on.
+ *  Standard variant (Basel current exposure method): max(mv, 0) + add-on. A trade
+ *  that is out of the money can still turn positive, so its add-on is kept in full. */
 export const exposureOf = (mv: number, addOn: number, offsetNegativeMv: boolean) =>
   offsetNegativeMv ? Math.max(mv + addOn, 0) : Math.max(mv, 0) + addOn;
 
@@ -102,7 +103,7 @@ export interface PillarAgg {
  *  With it: the exposure of the summed market value and the net add-on, where
  *  net add-on = (0.4 + 0.6 x NGR) x gross add-on and
  *  NGR = max(sum of mv, 0) / sum of max(mv, 0). */
-export function psrByPillar(risks: TradeRisk[], closeOutNetting: boolean, offsetNegativeMv = false): PillarAgg[] {
+export function psrByPillar(risks: TradeRisk[], closeOutNetting: boolean, offsetNegativeMv: boolean): PillarAgg[] {
   return PILLARS.map((_, p) => {
     const set = risks.filter((r) => r.pillar >= p);
     const sumMv = set.reduce((s, r) => s + r.mv, 0);

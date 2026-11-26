@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import golden from '../src/data/golden.json';
 import { PILLARS, pillarEnds, pillarIndex, spotDate, tenorDate, tomDate } from '../src/engine/calendar';
 import { defaultState } from '../src/engine/defaults';
-import { board, checkTrade } from '../src/engine/lines';
+import { board, checkTrade, lineStatus } from '../src/engine/lines';
 import { dfUsd } from '../src/engine/market';
 import { exposureOf, makeCtx, psrByPillar, srByDate, valueLeg, valueTrade, type TradeRisk } from '../src/engine/risk';
 import { nextPillarStep, rollSummary } from '../src/engine/roll';
-import { buildTrade, candidates, largestThatFits, reducer } from '../src/engine/state';
+import { dayReportCsv, reportRows } from '../src/engine/report';
+import { NOTIONAL_LINE, SR_LINE, buildTrade, candidates, largestThatFits, psrLine, reducer } from '../src/engine/state';
 import type { AppState, PairId, Tenor, Ticket, Trade } from '../src/engine/types';
 
 const FAR_TENORS = ['SN', '1W', '1M', '2M', '3M', '6M', '9M', '1Y'] as const;
@@ -52,8 +53,9 @@ const deal = (s: AppState, t: Ticket): Trade => {
   if ('error' in built) throw new Error(built.error);
   return built;
 };
+/** A hedge reduced to what the pillar sums read, on the limit system's method: max(mv + add-on, 0). */
 const risk = (pillar: number, mv: number, addOn: number): TradeRisk =>
-  ({ pillar, mv, addOn, exposure: Math.max(mv, 0) + addOn }) as TradeRisk;
+  ({ pillar, mv, addOn, exposure: exposureOf(mv, addOn, true) }) as TradeRisk;
 
 describe('time pillars', () => {
   it('a tenor traded from spot falls in the pillar of the same name', () => {
@@ -84,44 +86,45 @@ describe('pre-settlement risk', () => {
     expect(PILLARS[valueTrade(makeCtx(s), late).pillar]).toBe('1Y');
   });
 
-  it('a negative market value does not reduce the add-on, unless the offset variant is switched on', () => {
-    expect(exposureOf(250, 300, false)).toBe(550);
-    expect(exposureOf(-100, 300, false)).toBe(300); // standard: the add-on is kept in full
-    expect(exposureOf(-100, 300, true)).toBe(200); // variant: the negative value offsets it
+  it('a negative market value reduces the add-on, unless the standard method is switched on', () => {
+    expect(exposureOf(250, 300, true)).toBe(550);
+    expect(exposureOf(-100, 300, true)).toBe(200); // the limit system's method: max(mv + add-on, 0)
     expect(exposureOf(-500, 300, true)).toBe(0);
+    expect(exposureOf(-100, 300, false)).toBe(300); // standard: the add-on is kept in full
 
-    const s = { ...defaultState(), offsetNegativeMv: true };
+    const s = defaultState();
+    expect(s.offsetNegativeMv).toBe(true); // the limit system's method is the default
     const t = deal(s, ticket());
     const cheap = { ...t, legs: [t.legs[0], { ...t.legs[1], rate: t.legs[1].rate - 0.01 }] }; // we sell EUR 1 cent too low
-    const standard = valueTrade(makeCtx(defaultState()), cheap);
-    const variant = valueTrade(makeCtx(s), cheap);
-    expect(standard.mv).toBeLessThan(0);
+    const bank = valueTrade(makeCtx(s), cheap);
+    const standard = valueTrade(makeCtx({ ...s, offsetNegativeMv: false }), cheap);
+    expect(bank.mv).toBeLessThan(0);
+    expect(bank.exposure).toBeCloseTo(bank.addOn + bank.mv, 6);
     expect(standard.exposure).toBeCloseTo(standard.addOn, 6);
-    expect(variant.exposure).toBeCloseTo(standard.addOn + standard.mv, 6);
   });
 
   it('a trade counts in its own pillar and every shorter one', () => {
-    const agg = psrByPillar([risk(3, 0, 300), risk(1, 0, 50)], false);
+    const agg = psrByPillar([risk(3, 0, 300), risk(1, 0, 50)], false, true);
     expect(agg.map((a) => a.exposure)).toEqual([350, 350, 300, 300, 0, 0]);
   });
 
   it('without netting, exposures add up trade by trade', () => {
-    const agg = psrByPillar([risk(0, 100, 50), risk(0, -80, 30)], false);
-    expect(agg[0].exposure).toBe(180); // (100 + 50) + (0 + 30)
+    const agg = psrByPillar([risk(0, 100, 50), risk(0, -20, 30), risk(0, -80, 30)], false, true);
+    expect(agg[0].exposure).toBe(160); // max(100 + 50, 0) + max(-20 + 30, 0) + max(-80 + 30, 0) = 150 + 10 + 0
   });
 
   it('with netting, market values offset and the add-on is scaled by the net-to-gross ratio', () => {
-    const [a] = psrByPillar([risk(0, 100, 50), risk(0, -80, 30)], true);
+    const [a] = psrByPillar([risk(0, 100, 50), risk(0, -80, 30)], true, true);
     expect(a.ngr).toBeCloseTo(0.2, 12); // max(20,0) / 100
     expect(a.addOnNet).toBeCloseTo((0.4 + 0.6 * 0.2) * 80, 12); // 41.6
-    expect(a.exposure).toBeCloseTo(20 + 41.6, 12); // max(20, 0) + net add-on
+    expect(a.exposure).toBeCloseTo(20 + 41.6, 12); // max(20 + net add-on, 0)
   });
 
   it('with netting and no positive market value, the full add-on is kept', () => {
-    const [a] = psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true);
+    const [a] = psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true, true);
     expect(a.ngr).toBe(1);
-    expect(a.exposure).toBe(80); // max(-15, 0) + 80
-    expect(psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true, true)[0].exposure).toBe(65); // variant: max(-15 + 80, 0)
+    expect(a.exposure).toBe(65); // max(-15 + 80, 0)
+    expect(psrByPillar([risk(0, -10, 50), risk(0, -5, 30)], true, false)[0].exposure).toBe(80); // standard: max(-15, 0) + 80
   });
 });
 
@@ -381,5 +384,120 @@ describe('a channel that discloses the counterparty after the trade', () => {
     let open = reducer(defaultState(), { type: 'SEND', ticket: order() });
     open = reducer(open, { type: 'NEXT_DAY' });
     expect(open.trades.every((t) => t.status === 'EXPIRED')).toBe(true);
+  });
+});
+
+describe('gross notional on 360T', () => {
+  // Bank E: USD 150m a day on 360T. EUR 40m is USD 46.6m, whichever way it is dealt.
+  const swap = (over: Partial<Ticket> = {}) => ticket({ lpId: 'E-360T', tenor: '1W', amount: 40 * M, ...over });
+  const notional = (s: AppState, groupId: string) => board(makeCtx(s), s, groupId).notional;
+
+  it('adds the size of every hedge dealt there today, buys and sells alike', () => {
+    let s = reducer(defaultState(), { type: 'SEND', ticket: swap() });
+    s = reducer(s, { type: 'FILL', id: 'H1' });
+    s = reducer(s, { type: 'SEND', ticket: swap({ side: 'SELL' }) }); // the opposite way: it adds, it does not offset
+    expect(notional(s, 'E')).toMatchObject({ line: 150 * M, earlier: 0 });
+    expect(notional(s, 'E')!.today).toBeCloseTo(46.6 * M, 6);
+    expect(notional(s, 'E')!.reserved).toBeCloseTo(46.6 * M, 6);
+    expect(notional(s, 'E')!.headroom).toBeCloseTo(56.8 * M, 6);
+  });
+
+  it('blocks the hedge that would pass the line, and only on 360T', () => {
+    let s = defaultState();
+    for (let i = 0; i < 3; i++) s = reducer(s, { type: 'SEND', ticket: swap() }); // USD 139.8m, all in flight
+    const fourth = checkTrade(makeCtx(s), s, deal(s, swap()));
+    expect(fourth.psr.every((r) => r.ok)).toBe(true); // 4 x 233,000 is well inside the 1W line of 2m
+    expect(fourth.notional).toMatchObject({ line: 150 * M, ok: false });
+    expect(fourth.notional!.after).toBeCloseTo(186.4 * M, 6);
+    expect(fourth.blockedByReservation).toBe(true);
+    expect(reducer(s, { type: 'SEND', ticket: swap() })).toBe(s);
+    // The same hedge with the same group on another channel does not touch this line.
+    const elsewhere = checkTrade(makeCtx(s), s, deal(s, swap({ lpId: 'E-FXGO' })));
+    expect(elsewhere.notional).toBeUndefined();
+    expect(elsewhere.ok).toBe(true);
+  });
+
+  it('starts from zero the next day, and a group with no LP on 360T has no such line', () => {
+    let s = reducer(defaultState(), { type: 'SEND', ticket: swap() });
+    s = reducer(s, { type: 'FILL', id: 'H1' });
+    s = reducer(s, { type: 'NEXT_DAY' });
+    expect(notional(s, 'E')).toMatchObject({ earlier: 0, today: 0, reserved: 0, headroom: 150 * M });
+    expect(board(makeCtx(s), s, 'E').psr[1].earlier).toBeGreaterThan(0); // the hedge itself is still open
+    expect(notional(s, 'C')).toBeUndefined();
+  });
+});
+
+describe('limits kept by a trader', () => {
+  it('records each change to a line: the day, the line, the old figure and the new one', () => {
+    let s = reducer(defaultState(), { type: 'SET_LINE', groupId: 'E', line: psrLine(3), value: 2 * M });
+    expect(s.groups[4].psrLines[3]).toBe(2 * M);
+    expect(s.limitLog).toEqual([{ date: '2026-11-30', groupId: 'E', line: 'PSR 3M', from: 1 * M, to: 2 * M }]);
+    s = reducer(s, { type: 'SET_LINE', groupId: 'E', line: SR_LINE, value: 25 * M });
+    s = reducer(s, { type: 'SET_LINE', groupId: 'E', line: NOTIONAL_LINE, value: 100 * M });
+    expect(s.groups[4]).toMatchObject({ srLine: 25 * M, notionalLine: 100 * M });
+    expect(s.limitLog.map((c) => [c.line, c.from, c.to])).toEqual([['PSR 3M', 1 * M, 2 * M], ['SR', 20 * M, 25 * M], ['NOTIONAL', 150 * M, 100 * M]]);
+  });
+
+  it('keeps one entry while a figure is being typed, and none if it ends where it started', () => {
+    let s = defaultState();
+    for (const value of [1 * M, 12 * M, 120 * M]) s = reducer(s, { type: 'SET_LINE', groupId: 'A', line: SR_LINE, value });
+    expect(s.limitLog).toEqual([{ date: '2026-11-30', groupId: 'A', line: 'SR', from: 60 * M, to: 120 * M }]);
+    s = reducer(s, { type: 'SET_LINE', groupId: 'A', line: SR_LINE, value: 60 * M });
+    expect(s.limitLog).toEqual([]);
+    // The same line changed on another day is another entry.
+    s = reducer(reducer(s, { type: 'SET_LINE', groupId: 'A', line: SR_LINE, value: 50 * M }), { type: 'NEXT_DAY' });
+    s = reducer(s, { type: 'SET_LINE', groupId: 'A', line: SR_LINE, value: 40 * M });
+    expect(s.limitLog.map((c) => [c.date, c.from, c.to])).toEqual([['2026-11-30', 60 * M, 50 * M], ['2026-12-01', 50 * M, 40 * M]]);
+    expect(reducer(s, { type: 'SET_LINE', groupId: 'A', line: 'PSR 2Y', value: 1 })).toBe(s); // no such line
+    expect(reducer(s, { type: 'SET_LINE', groupId: 'A', line: SR_LINE, value: -1 })).toBe(s);
+  });
+
+  it('a lowered line blocks the next hedge at once', () => {
+    const s0 = defaultState();
+    const hedge = ticket({ lpId: 'E-360T' }); // 466,000 against a 3M line of 1m
+    expect(checkTrade(makeCtx(s0), s0, deal(s0, hedge)).ok).toBe(true);
+    const s1 = reducer(s0, { type: 'SET_LINE', groupId: 'E', line: psrLine(3), value: 0.4 * M });
+    expect(checkTrade(makeCtx(s1), s1, deal(s1, hedge)).ok).toBe(false);
+  });
+});
+
+describe('warning level, counterparty list and the end-of-day report', () => {
+  it('warns from the warning level up, and says over only past the line', () => {
+    expect(lineStatus(0, 100 * M, 80)).toBe('OK');
+    expect(lineStatus(79 * M, 100 * M, 80)).toBe('OK');
+    expect(lineStatus(80 * M, 100 * M, 80)).toBe('WARN');
+    expect(lineStatus(100 * M, 100 * M, 80)).toBe('WARN'); // full, not over
+    expect(lineStatus(101 * M, 100 * M, 80)).toBe('OVER');
+    expect(lineStatus(90 * M, 100 * M, 0)).toBe('OK'); // warnings switched off
+    expect(lineStatus(0, 0, 80)).toBe('OK'); // no line and nothing on it
+  });
+
+  it('a counterparty off the list is sent no hedge, on any size', () => {
+    const s0 = defaultState();
+    const s1 = reducer(s0, { type: 'LIST_LP', lpId: 'A-LDN-360T', on: false });
+    expect(candidates(makeCtx(s1), s1, ticket())).toEqual({ error: 'LP_OFF_LIST' });
+    expect(reducer(s1, { type: 'SEND', ticket: ticket() })).toBe(s1);
+    // The same group on another channel is another entry on the list.
+    expect(reducer(s1, { type: 'SEND', ticket: ticket({ lpId: 'A-LDN-FXGO' }) }).trades).toHaveLength(1);
+    expect(reducer(s1, { type: 'LIST_LP', lpId: 'A-LDN-360T', on: true }).blocked).toEqual([]);
+    // On a book the desk cannot choose the counterparty, so the list does not apply there.
+    expect(reducer(s0, { type: 'LIST_LP', lpId: 'B-EBSM', on: false })).toBe(s0);
+  });
+
+  it('reports every line, the lines changed today and the hedges dealt today', () => {
+    let s = reducer(defaultState(), { type: 'SET_LINE', groupId: 'E', line: psrLine(3), value: 0.5 * M });
+    s = reducer(s, { type: 'SEND', ticket: ticket({ lpId: 'E-360T' }) }); // 466,000 of 500,000 at 3M and shorter
+    s = reducer(s, { type: 'FILL', id: 'H1' });
+    const rows = reportRows(s).filter((r) => r.group === 'Bank E');
+    expect(rows.map((r) => `${r.measure} ${r.key}`)).toEqual([...['O/N', '1W', '1M', '3M', '6M', '1Y'].map((p) => `Pre-settlement risk ${p}`), 'Gross notional 360T']);
+    expect(rows.map((r) => r.status)).toEqual(['OK', 'OK', 'OK', 'WARN', 'OK', 'OK', 'OK']);
+    expect(rows[3]).toMatchObject({ line: 500_000, used: 466_000, reserved: 0, headroom: 34_000 });
+
+    const csv = dayReportCsv(s).split('\n');
+    expect(csv[0]).toBe('End-of-day report,2026-11-30');
+    expect(csv).toContain('Bank E,Pre-settlement risk,3M,500000,466000,0,34000,93.2,WARN');
+    expect(csv).toContain('Bank E,Gross notional,360T,150000000,23300000,0,126700000,15.5,OK');
+    expect(csv).toContain('Bank E,PSR 3M,1000000,500000');
+    expect(csv).toContain('H1,Bank E,360T,SWAP,EURUSD,BUY,20000000,3M,FILLED');
   });
 });

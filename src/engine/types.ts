@@ -59,6 +59,8 @@ export interface Group {
   paymentNetting: boolean; // same-currency flows on one date offset when measuring SR
   psrLines: number[]; // USD, one per time pillar
   srLine: number; // USD, the same for every settlement date
+  /** USD. The most the desk may deal with the group on 360T in one day, buys and sells added. Zero when it has no LP there. */
+  notionalLine: number;
 }
 
 /** A legal entity of a group, as reached on one channel. */
@@ -67,6 +69,15 @@ export interface Lp {
   name: string;
   channel: Channel;
   groupId: string;
+}
+
+/** One change a trader made to a line on the limit management page. */
+export interface LimitChange {
+  date: ISODate;
+  groupId: string;
+  line: string; // 'PSR 3M', 'SR' or 'NOTIONAL'
+  from: number; // USD
+  to: number; // USD
 }
 
 export interface AppState {
@@ -79,9 +90,16 @@ export interface AppState {
   /** Channels that disclose after the trade where the desk has switched its own check off: orders there are
    *  neither checked nor reserved, and a fill is booked when the channel reports it. */
   bookCheckOff: Channel[];
+  /** LPs taken off the counterparty list: the desk sends them no hedge. */
+  blocked: string[];
   addOnPct: number[]; // percent of notional, one per time pillar
-  /** Internal variant: a negative market value reduces the add-on. Off is the standard method. */
-  offsetNegativeMv?: boolean;
+  /** On: exposure = max(market value + add-on, 0), so a negative market value reduces the add-on. This is the
+   *  limit system's method. Off: max(market value, 0) + add-on, the Basel current exposure method. */
+  offsetNegativeMv: boolean;
+  /** Percent of a line in use at which the screens start to warn. */
+  warnPct: number;
+  /** Every change made to a line, oldest first. */
+  limitLog: LimitChange[];
   trades: Trade[];
   nextId: number;
 }

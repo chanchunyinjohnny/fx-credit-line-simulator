@@ -83,8 +83,8 @@ const T = {
         : `Exposure = max(market value, 0) + add-on = max(${mv}, 0) + ${a} = ${mid} + ${a} = USD ${e}`,
     negative: (offset: boolean) =>
       offset
-        ? 'The offset setting is on: a negative market value reduces the add-on. The standard method does not allow this.'
-        : 'A negative market value does not reduce the add-on: the hedge could still turn positive before it matures.',
+        ? 'A negative market value reduces the add-on. This is the limit system’s method; the Basel standard method keeps the add-on in full.'
+        : 'The standard method is switched on: a negative market value does not reduce the add-on, because the hedge could still turn positive before it matures.',
     s6: (g: string) => `Pre-settlement risk of ${g}`,
     s6Result: (p: string, e: string, l: string) => `${p}: USD ${e} of ${l}`,
     unchanged: 'Unchanged',
@@ -122,6 +122,11 @@ const T = {
     netBy: (list: string, e: string) => `Net by currency: ${list}; positive nets add to USD ${e}`,
     receivables: (list: string, e: string) => `Receivables: ${list} = USD ${e}`,
     against: (l: string, e: string, rest: string, over: string | null) => (over ? `Daily line ${l} − ${e}: over by ${over}` : `Daily line ${l} − ${e} = ${rest} left`),
+    s8: (g: string) => `Gross notional on 360T today, with ${g}`,
+    s8Result: (e: string, l: string) => `USD ${e} of ${l}`,
+    notionalWhy: 'This hedge is sent on 360T, where a third line applies: the notional dealt with the counterparty there in one day. Every hedge counts at its full size. Buys and sells are added, not netted, and the count starts from zero each day.',
+    notionalSize: (swap: boolean, base: string, a: string, fx: string | null, n: string) => `Size of this hedge = ${swap ? 'far-leg ' : ''}amount at spot = ${base} ${a}${fx ? ` × ${fx}` : ''} = USD ${n}`,
+    notionalSum: (list: string, e: string) => `Gross notional today = ${list} = USD ${e}`,
   },
   zh: {
     and: '和',
@@ -183,7 +188,8 @@ const T = {
       offset
         ? `風險敞口 = max(市值 + 附加金額, 0) = max(${mv} + ${a}, 0) = max(${mid}, 0) = USD ${e}`
         : `風險敞口 = max(市值, 0) + 附加金額 = max(${mv}, 0) + ${a} = ${mid} + ${a} = USD ${e}`,
-    negative: (offset: boolean) => (offset ? '已開啟抵銷設定：負市值會減少附加金額。標準方法不允許這樣做。' : '負市值不能減少附加金額：到期前市值仍可能轉正。'),
+    negative: (offset: boolean) =>
+      offset ? '負市值會減少附加金額。這是額度系統的做法；巴塞爾的標準方法保留全部附加金額。' : '已改用標準方法：負市值不能減少附加金額，因為到期前市值仍可能轉正。',
     s6: (g: string) => `${g}的交割前風險`,
     s6Result: (p: string, e: string, l: string) => `${p}：USD ${e} / ${l}`,
     unchanged: '不變',
@@ -221,6 +227,11 @@ const T = {
     netBy: (list: string, e: string) => `各幣種淨額：${list}；正數相加 = USD ${e}`,
     receivables: (list: string, e: string) => `應收：${list} = USD ${e}`,
     against: (l: string, e: string, rest: string, over: string | null) => (over ? `每日額度 ${l} − ${e}：超出 ${over}` : `每日額度 ${l} − ${e} = 尚餘 ${rest}`),
+    s8: (g: string) => `今日在 360T 與${g}的名義金額總額`,
+    s8Result: (e: string, l: string) => `USD ${e} / ${l}`,
+    notionalWhy: '這筆對沖經 360T 送出。360T 多一條額度：每日與這個對手在 360T 成交的名義金額。每筆對沖按全額計，買賣相加，不互相抵銷；每日從零開始。',
+    notionalSize: (swap: boolean, base: string, a: string, fx: string | null, n: string) => `本筆的金額 = ${swap ? '遠端' : ''}金額按即期折算 = ${base} ${a}${fx ? ` × ${fx}` : ''} = USD ${n}`,
+    notionalSum: (list: string, e: string) => `今日名義金額總額 = ${list} = USD ${e}`,
   },
 };
 
@@ -370,6 +381,8 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom }:
     .map((l) => measured.sr.get(l.date)!)
     .filter(Boolean);
   const who = (id: string) => (id === trade.id ? (isNew ? t.thisHedge : t.thisId(id)) : id);
+  // Only a hedge dealt today on 360T is part of today's gross notional there.
+  const inNotional = measured.notionalParts.some((x) => x.tradeId === trade.id);
   const g = partyName(group.name, lang);
   const r = (x: number) => rate(trade.pair, x);
   const today = (x: number) => (isNew ? r(x) : fineRate(trade.pair, x)); // today's rate for an old hedge lies between quotes
@@ -634,6 +647,22 @@ export function Workings({ ctx, trade, risk, measured, group, isNew, openFrom }:
           </>
         )}
       </Step>
+
+      {inNotional && (
+        <Step open={open(8)} title={t.s8(g)} result={t.s8Result(amt(measured.notional), amt(group.notionalLine))}>
+          <p>{t.notionalWhy}</p>
+          <Calc>{t.notionalSize(isSwap, info.base, amt(Math.abs(far.base)), info.base === 'USD' ? null : baseUsd.toFixed(info.dp), amt(risk.notionalUsd))}</Calc>
+          <Calc>{t.notionalSum(list(measured.notionalParts.map((x) => `${who(x.tradeId)} ${amt(x.usd)}`)), amt(measured.notional))}</Calc>
+          <Calc>
+            {t.against(
+              amt(group.notionalLine),
+              amt(measured.notional),
+              amt(group.notionalLine - measured.notional),
+              measured.notional <= group.notionalLine ? null : amt(measured.notional - group.notionalLine),
+            )}
+          </Calc>
+        </Step>
+      )}
     </ol>
   );
 }

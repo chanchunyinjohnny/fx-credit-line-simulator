@@ -5,26 +5,28 @@ export const START_DATE = '2026-11-30';
 const M = 1_000_000;
 
 /** The starting state. Every name, credit line, add-on and price is invented.
- *  Close-out netting starts off for every group: utilisation is measured gross until someone switches it on. */
+ *  Close-out netting starts off for every group: utilisation is measured gross until someone switches it on.
+ *  The last figure of each group is its 360T gross notional line; Bank C has no LP there. */
 export function defaultState(): AppState {
   const market: MarketData = structuredClone({ usdRates: marketJson.usdRates, pairs: marketJson.pairs });
-  const group = (id: string, name: string, closeOutNetting: boolean, paymentNetting: boolean, psr: number[], sr: number) => ({
+  const group = (id: string, name: string, closeOutNetting: boolean, paymentNetting: boolean, psr: number[], sr: number, notional: number) => ({
     id,
     name,
     closeOutNetting,
     paymentNetting,
     psrLines: psr.map((x) => x * M),
     srLine: sr * M,
+    notionalLine: notional * M,
   });
   return {
     businessDate: START_DATE,
     market,
     groups: [
-      group('A', 'Bank A Group', false, true, [8, 8, 6, 5, 3, 2], 60),
-      group('B', 'Bank B', false, false, [5, 5, 4, 3, 2, 1], 40),
-      group('C', 'Bank C', false, false, [3, 3, 2, 1.5, 1, 0.5], 25),
-      group('D', 'Bank D', false, true, [4, 4, 3, 2, 1, 0], 30),
-      group('E', 'Bank E', false, false, [2, 2, 1.5, 1, 0.5, 0], 20),
+      group('A', 'Bank A Group', false, true, [8, 8, 6, 5, 3, 2], 60, 300),
+      group('B', 'Bank B', false, false, [5, 5, 4, 3, 2, 1], 40, 200),
+      group('C', 'Bank C', false, false, [3, 3, 2, 1.5, 1, 0.5], 25, 0),
+      group('D', 'Bank D', false, true, [4, 4, 3, 2, 1, 0], 30, 150),
+      group('E', 'Bank E', false, false, [2, 2, 1.5, 1, 0.5, 0], 20, 150),
     ],
     lps: [
       { id: 'A-LDN-360T', name: 'Bank A London', channel: '360T', groupId: 'A' },
@@ -45,8 +47,11 @@ export function defaultState(): AppState {
     ],
     channelOff: [],
     bookCheckOff: [],
+    blocked: [],
     addOnPct: [0.2, 0.5, 1.0, 2.0, 3.0, 4.5],
-    offsetNegativeMv: false,
+    offsetNegativeMv: true,
+    warnPct: 80,
+    limitLog: [],
     trades: [],
     nextId: 1,
   };

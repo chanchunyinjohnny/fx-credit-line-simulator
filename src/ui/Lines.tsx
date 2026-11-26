@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { PILLARS } from '../engine/calendar';
 import { CHANNELS } from '../engine/channels';
-import { board, type BoardRow } from '../engine/lines';
+import { board, lineStatus, type BoardRow } from '../engine/lines';
+import { dayReportCsv } from '../engine/report';
 import { makeCtx } from '../engine/risk';
 import type { AppState, Group } from '../engine/types';
 import { Status } from './bits';
@@ -13,10 +14,15 @@ const T = {
   en: {
     unit: 'USD mio',
     today: 'Today, by banking group',
-    todayNote: 'A group has one set of lines, shared by all its LPs and channels. Each cell is pre-settlement risk in use, reservations included, against the line for that pillar.',
+    todayNote: 'A group has one set of lines, shared by all its LPs and channels. Each cell is what is in use, reservations included, against the line.',
+    warnNote: (level: number) => `! marks a line at or past the warning level of ${level}%. ✕ marks a line that is over.`,
     group: 'Banking group and its LPs',
     to: (d: string) => `to ${d}`,
     busiest: 'Settlement, busiest day',
+    notional: 'Gross notional on 360T, dealt today',
+    notionalNote: 'What the desk has dealt with each group on 360T today, buys and sells added, against its line for the day. The count starts from zero each day.',
+    channel: 'Channel',
+    noLp: 'no LP there',
     noLine: 'no line',
     on: (d: string) => `on ${d}`,
     byDate: 'Settlement risk, by date',
@@ -25,14 +31,22 @@ const T = {
     line: (x: string) => `line ${x}`,
     empty: 'Nothing is due outside CLS. Payments through CLS and NDFs carry no settlement risk; a USD/CNH swap or the same-day leg of an overnight swap does.',
     overBy: (x: string) => `over by ${x}`,
+    report: 'End-of-day report',
+    reportNote: 'Where every line stands, the lines changed today and the hedges dealt today, as one file.',
+    download: 'Download the report (CSV)',
   },
   zh: {
     unit: '百萬美元',
     today: '今日各銀行集團的額度',
-    todayNote: '每個集團只有一套額度，旗下所有 LP 和渠道共用。每格是該期限檔已用的交割前風險（包括預佔）對比額度。',
+    todayNote: '每個集團只有一套額度，旗下所有 LP 和渠道共用。每格是已用的金額（包括預佔）對比額度。',
+    warnNote: (level: number) => `「!」代表已用到預警線 ${level}% 或以上；「✕」代表已超出額度。`,
     group: '銀行集團及其 LP',
     to: (d: string) => `至 ${d}`,
     busiest: '結算風險，最高一日',
+    notional: '360T 名義金額總額（當日成交）',
+    notionalNote: '今日在 360T 與各集團成交的名義金額，買賣相加，對比當日的額度。每日從零開始。',
+    channel: '渠道',
+    noLp: '沒有 LP',
     noLine: '無額度',
     on: (d: string) => `${d}`,
     byDate: '逐日的結算風險',
@@ -41,19 +55,33 @@ const T = {
     line: (x: string) => `額度 ${x}`,
     empty: '目前沒有 CLS 以外的未交收款項。經 CLS 交收的款項和 NDF 沒有結算風險；USD/CNH 掉期和隔夜掉期當日那一邊才有。',
     overBy: (x: string) => `超出 ${x}`,
+    report: '日終報表',
+    reportNote: '各條額度的使用情況、當日改過的額度和當日的對沖，合成一個檔案。',
+    download: '下載報表（CSV）',
   },
 };
 
 /** Used against a line, as a figure with a thin bar under it. */
-function Cell({ row, label, noLine, overBy }: { row: BoardRow; label: string; noLine: string; overBy: (x: string) => string }) {
+function Cell({ row, label, noLine, overBy, warnPct }: { row: BoardRow; label: string; noLine: string; overBy: (x: string) => string; warnPct: number }) {
   if (row.line < 0.5 && row.used < 0.5) return <span className="quiet-inline">{noLine}</span>;
-  const ok = row.used <= row.line + 0.5;
+  const status = lineStatus(row.used, row.line, warnPct);
+  const figure = `${mio(row.used)} / ${mio(row.line)}`;
   return (
     <>
-      {ok ? `${mio(row.used)} / ${mio(row.line)}` : <Status ok={false}>{overBy(mio(row.used - row.line))}</Status>}
-      <LineBar dense label={label} line={row.line} parts={[row.earlier + row.today, row.reserved]} total={row.used} ok={ok} />
+      {status === 'OVER' ? <Status ok={false}>{overBy(mio(row.used - row.line))}</Status> : status === 'WARN' ? <Status ok warn>{figure}</Status> : figure}
+      <LineBar dense label={label} line={row.line} parts={[row.earlier + row.today, row.reserved]} total={row.used} ok={status !== 'OVER'} warn={status === 'WARN'} />
     </>
   );
+}
+
+/** Hand the end-of-day report to the browser as a file. */
+function download(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export function Lines({ state }: { state: AppState }) {
@@ -79,7 +107,9 @@ export function Lines({ state }: { state: AppState }) {
           </h2>
           <BarLegend />
         </div>
-        <p className="quiet hint">{t.todayNote}</p>
+        <p className="quiet hint">
+          {t.todayNote} {t.warnNote(state.warnPct)}
+        </p>
         <div className="table-wrap">
           <table className="table overview">
             <thead>
@@ -105,13 +135,13 @@ export function Lines({ state }: { state: AppState }) {
                     </td>
                     {b.psr.map((r) => (
                       <td key={r.key}>
-                        <Cell row={r} label={`${name(g)} ${r.key}`} noLine={t.noLine} overBy={t.overBy} />
+                        <Cell row={r} label={`${name(g)} ${r.key}`} noLine={t.noLine} overBy={t.overBy} warnPct={state.warnPct} />
                       </td>
                     ))}
                     <td>
                       {peak ? (
                         <>
-                          <Cell row={peak} label={`${name(g)} ${shortDay(peak.key, lang)}`} noLine={t.noLine} overBy={t.overBy} />
+                          <Cell row={peak} label={`${name(g)} ${shortDay(peak.key, lang)}`} noLine={t.noLine} overBy={t.overBy} warnPct={state.warnPct} />
                           <span className="td-sub">{t.on(shortDay(peak.key, lang))}</span>
                         </>
                       ) : (
@@ -155,7 +185,11 @@ export function Lines({ state }: { state: AppState }) {
                     <td>{day(d, lang)}</td>
                     {boards.map(({ g, b }) => {
                       const r = b.sr.find((x) => x.key === d);
-                      return <td key={g.id}>{r ? <Cell row={r} label={`${name(g)} ${shortDay(d, lang)}`} noLine={t.noLine} overBy={t.overBy} /> : <span className="quiet-inline">–</span>}</td>;
+                      return (
+                        <td key={g.id}>
+                          {r ? <Cell row={r} label={`${name(g)} ${shortDay(d, lang)}`} noLine={t.noLine} overBy={t.overBy} warnPct={state.warnPct} /> : <span className="quiet-inline">–</span>}
+                        </td>
+                      );
                     })}
                   </tr>
                 ))}
@@ -163,6 +197,54 @@ export function Lines({ state }: { state: AppState }) {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="card">
+        <div className="lines-head">
+          <h2>
+            {t.notional} <span className="quiet-inline">· {t.unit}</span>
+          </h2>
+        </div>
+        <p className="quiet hint">{t.notionalNote}</p>
+        <div className="table-wrap">
+          <table className="table overview">
+            <thead>
+              <tr>
+                <th>{t.channel}</th>
+                {boards.map(({ g }) => (
+                  <th key={g.id}>
+                    {name(g)}
+                    <span className="th-sub">{g.notionalLine > 0.5 ? t.line(mio(g.notionalLine)) : ' '}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>360T</td>
+                {boards.map(({ g, b }) => (
+                  <td key={g.id}>
+                    {b.notional ? (
+                      <Cell row={b.notional} label={`${name(g)} ${t.notional}`} noLine={t.noLine} overBy={t.overBy} warnPct={state.warnPct} />
+                    ) : (
+                      <span className="quiet-inline">{t.noLp}</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card report">
+        <div>
+          <h2 className="card-title">{t.report}</h2>
+          <p className="quiet">{t.reportNote}</p>
+        </div>
+        <button type="button" className="secondary" onClick={() => download(`credit-lines-${state.businessDate}.csv`, dayReportCsv(state))}>
+          {t.download}
+        </button>
       </section>
     </>
   );

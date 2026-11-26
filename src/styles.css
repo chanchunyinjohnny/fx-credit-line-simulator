@@ -4,7 +4,7 @@ body { margin: 0; background: #fafaf7; }
 
 .app {
   --paper: #fafaf7; --ink: #30343a; --accent: #2148b8; --muted: #676d76; --rule: #dddeda; --soft: #eef1f8;
-  --tint: #f2f2ed; --bad: #a62a2a; --bad-mark: #d03b3b; --ok-mark: #0b8a0b;
+  --tint: #f2f2ed; --bad: #a62a2a; --bad-mark: #d03b3b; --ok-mark: #0b8a0b; --warn: #855000; --warn-mark: #b86e00;
   --s-used: #2148b8; --s-reserved: #1baf7a; --s-hedge: #eb6834; --track: #e6e7e1;
   --display: Georgia, 'Songti TC', 'Noto Serif TC', serif;
   --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
@@ -86,6 +86,8 @@ body { margin: 0; background: #fafaf7; }
 .quiet-inline { color: var(--muted); font-weight: 400; }
 .status { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
 .status-ok > span:first-child { color: var(--ok-mark); font-weight: 700; }
+.status-warn { color: var(--warn); }
+.status-warn > span:first-child { color: var(--warn-mark); font-weight: 700; }
 .status-bad { color: var(--bad); }
 .status-bad > span:first-child { color: var(--bad-mark); font-weight: 700; }
 .alert { border-left: 2px solid var(--bad-mark); padding: 4px 0 4px 12px; color: var(--bad); margin-bottom: 18px; }
@@ -107,6 +109,7 @@ body { margin: 0; background: #fafaf7; }
 .bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; background: var(--track); overflow: hidden; }
 .bar .seg { height: 100%; border-radius: 5px; min-width: 2px; }
 .bar-over { outline: 1px solid var(--bad-mark); outline-offset: 2px; }
+.bar-warn { outline: 1px solid var(--warn-mark); outline-offset: 2px; }
 .bar-dense { height: 4px; border-radius: 2px; margin-top: 6px; }
 .bar-dense .seg { border-radius: 2px; }
 .seg-used { background: var(--s-used); }
@@ -154,7 +157,16 @@ body { margin: 0; background: #fafaf7; }
 .hedges td:nth-child(4), .hedges th:nth-child(4), .hedges td:last-child { text-align: right; }
 .row-actions { display: inline-flex; gap: 6px; align-items: center; }
 .edit-table td { padding: 4px; }
-.edit-table input[type='number'] { width: 70px; height: 30px; text-align: right; padding: 0 6px; }
+.edit-table input[type='number'], .setting-number input[type='number'] { width: 70px; height: 30px; text-align: right; padding: 0 6px; }
+.setting-number { align-items: center; }
+.app .setting-number input { margin-top: 0; }
+.sub-title { font-size: 15px; font-weight: 500; margin: 22px 0 6px; }
+.table.records { width: auto; min-width: 60%; }
+.table.records td, .table.records th { text-align: left; padding-right: 28px; }
+.table.records .num { text-align: right; }
+.report { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.report .card-title { margin-bottom: 4px; }
+.lines + .lines, .quiet + .lines { margin-top: 14px; }
 .edit-table input.wide { width: 88px; }
 
 /* ------------------------------------------------------------- workings */

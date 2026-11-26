@@ -24,7 +24,7 @@ const T = {
     psr: ['Pre-settlement risk', 'Cost to replace it if the counterparty fails first'],
     sr: 'Settlement risk',
     srNote: (x: string) => `Through CLS. Settled gross: ${x} on each value date`,
-    unit: 'USD mio. So each counterparty has two credit lines, and a hedge needs room on both.',
+    unit: 'USD mio. So each counterparty has a credit line for each kind of risk, and a hedge needs room on both. On 360T the trade size is counted too: the notional dealt there in a day has a line of its own.',
     method: 'The method',
     rows: [
       {
@@ -39,22 +39,28 @@ const T = {
       },
       {
         title: 'Pre-settlement risk',
-        text: "Today's value if it is positive, plus an add-on for how far it could still move. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one, because each pillar's line caps the risk still open at that point: the overnight line takes every hedge, the 3M line only those that run past the 1M pillar. The same amount shows in each of those pillars; it is one risk measured against several lines, not added up. Longer risk is worth less room, so lines usually step down as the tenor grows.",
+        text: "Today's market value plus an add-on for how far it could still move, and never less than zero. A hedge that is out of the money therefore uses less than its add-on. It is measured gross at this stage: hedge by hedge, with no netting between them and no collateral. A swap counts on its far leg. A hedge counts in the pillar it matures in and in every shorter one, because each pillar's line caps the risk still open at that point: the overnight line takes every hedge, the 3M line only those that run past the 1M pillar. The same amount shows in each of those pillars; it is one risk measured against several lines, not added up. Longer risk is worth less room, so lines usually step down as the tenor grows.",
         calcs: [
           'a 3M swap counts in O/N, 1W, 1M and 3M, and not in 6M or 1Y',
-          'exposure = max(market value, 0) + notional × add-on %',
-          'with close-out netting: max(Σ market value, 0) + (0.4 + 0.6 × NGR) × Σ add-on',
+          'exposure of a hedge = max(market value + notional × add-on %, 0)',
+          'pre-settlement risk in a pillar = Σ exposure of the hedges counted there',
+          'if close-out netting is switched on for a group: max(Σ market value + (0.4 + 0.6 × NGR) × Σ add-on, 0)',
           'NGR = max(Σ market value, 0) ÷ Σ max(market value, 0)',
         ],
       },
       {
         title: 'Settlement risk',
-        text: 'What we are due to receive on a settlement day: lost if we pay and are not paid. Zero through CLS and for NDFs. A payment due on the day it is dealt always counts in full.',
+        text: 'What we are due to receive on a settlement day: lost if we pay and are not paid. Some payments are exempt and count as zero: those settled through CLS or another payment-versus-payment arrangement, and NDFs, which pay one net amount. Trades with an internal counterparty and exchange-traded futures are exempt as well; neither is sent from this simulator. A payment due on the day it is dealt always counts in full.',
         calcs: ['exposure on a date = amounts receivable that day, in USD at spot'],
       },
       {
+        title: 'Gross notional on 360T',
+        text: 'On 360T a third line applies: the notional dealt with a counterparty there in one day. Every hedge counts at its full size. Buys and sells are added, not netted, and the count starts from zero each day.',
+        calcs: ['gross notional today = Σ size of each hedge dealt with the counterparty on 360T today, in USD at spot'],
+      },
+      {
         title: 'The check',
-        text: 'A hedge goes out only if every pillar and date stays within its line. Sending reserves the room until the LP fills or rejects. With no answer after 5 seconds the venue is asked, and the room stays reserved until it confirms no trade.',
+        text: 'A hedge goes out only if every pillar and date stays within its line, and on 360T the notional of the day as well. Sending reserves the room until the LP fills or rejects. With no answer after 5 seconds the venue is asked, and the room stays reserved until it confirms no trade. A line that is 80% used shows a warning; a hedge is blocked only when it would take a line over.',
         calcs: ["headroom = credit line − earlier days − today's fills − reservations"],
       },
       {
@@ -66,12 +72,12 @@ const T = {
     steps: 'The same swap, step by step',
     dealt: (d: string) => `The day it is dealt, ${d}`,
     later: (r: string) => `A week later, spot up 1% to ${r}`,
-    laterText: (k: string, mv: string, a: string, c: string) =>
-      `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. A negative value does not reduce the add-on, because the hedge could still turn positive: exposure is the add-on, ${a}. Dealt the other way round the value would be positive and exposure ${c}.`,
+    laterText: (k: string, mv: string, a: string, e: string, c: string) =>
+      `We sell EUR on the far leg at ${k}, now below the market, so the market value is USD ${mv}. It comes off the add-on of ${a}: exposure is max(${mv} + ${a}, 0) = ${e}. Dealt the other way round the value would be positive and exposure ${c}.`,
     bk: 'A channel that discloses after the trade, step by step',
     bkIntro: (ch: string, n: number, size: string, tenor: string) => `${n} counterparties could fill an order on ${ch}. The desk places a USD/TWD NDF, ${tenor}, for USD ${size}.`,
     bkSteps: ['Before placing: check every counterparty', 'The tightest line sets the largest order', 'Cut the order to that size, then place and reserve', 'The fill: one becomes usage, the others are released'],
-    bkRisk: (size: string, pct: string, e: string) => `what the order would use = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    bkRisk: (size: string, pct: string, e: string) => `what the order would use = max(0 + ${size} × ${pct}%, 0) = USD ${e}`,
     bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
       `${g}: ${p} line ${line} − ${before} in use or reserved = ${room}, ${ok ? 'room for' : 'no room for'} ${e}`,
     bkBlocked: (g: string) => `${g} has no room, so the whole order is held back: the desk cannot choose who fills it.`,
@@ -85,7 +91,9 @@ const T = {
     bkEnd: (full: string, g: string) => `No limit held at the channel was changed at any point. Placing the full USD ${full} would need ${g} switched off at the channel, which only its credit administrator can do.`,
     more: 'Assumptions, limits and sources',
     notes: [
-      'Exposure floors the market value at zero before adding the add-on, as in the Basel current exposure method and the OCC handbook on derivatives. Some internal limit systems let a negative value reduce the add-on; a setting under "Credit lines and add-ons" switches to that form.',
+      'Exposure is max(market value + add-on, 0), hedge by hedge. This is the method of the limit system the desk reports to, as confirmed by the risk lead, so a negative market value reduces the add-on. The Basel current exposure method and the OCC handbook on derivatives floor the market value at zero first and keep the add-on in full; a setting under "Limit management" switches to that form.',
+      'Exposure is measured gross at this stage, without netting or collateral. The two netting switches for each banking group are kept for later and start switched off.',
+      'Gross notional on 360T is named as a third measure in the requirement, without a definition. Here it is the notional dealt with a counterparty on 360T in one day: each hedge counted once at its full size, buys and sells added, starting from zero each day. That reading is an assumption still to confirm, and so is the warning level of 80%.',
       'Net-to-gross ratio and add-on netting: Basel II framework, Annex 4. With no positive market value the ratio is taken as 1, as the US swap margin rule does for the same formula.',
       'Settlement risk is what is due to be received, counted on the value date only. This is the common convention for a daily settlement limit: 52% of institutions in the 2006 CPSS survey measured it this way. Basel (2013) and the HKMA (TA-2) define the exposure as running from when our payment can no longer be cancelled until receipt is confirmed. That took 26 hours on average in the survey, so one day can understate it.',
       'CLS has 18 eligible currencies, without CNH or TWD. Instructions are due by 00:00 CET on the value date, so a payment due on the day it is dealt always counts in full. The other leg can still go through CLS.',
@@ -102,7 +110,7 @@ const T = {
     psr: ['交割前風險', '對手先違約時，重新做這筆交易的成本'],
     sr: '結算風險',
     srNote: (x: string) => `經 CLS 交收為零。全額結算則每個交割日 ${x}`,
-    unit: '單位：百萬美元。所以每個對手有兩條授信額度，一筆對沖兩條都要放得進。',
+    unit: '單位：百萬美元。所以每個對手每種風險各有一條授信額度，一筆對沖兩條都要放得進。在 360T 還要計交易金額：每日在 360T 成交的名義金額另有一條額度。',
     method: '計算方法',
     rows: [
       {
@@ -117,23 +125,29 @@ const T = {
       },
       {
         title: '交割前風險',
-        text: '今日市值（為正數時），加上一個反映日後可能波動的附加金額。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。原因是每一檔限制的是到那時仍未到期的風險：O/N 檔包含所有對沖，3M 檔只包含過了 1M 檔仍未到期的對沖。各檔顯示的是同一個金額，是同一份風險分別對照幾條額度，不是加起來。期限越長風險越大，所以額度通常隨期限遞減。',
+        text: '今日市值，加上一個反映日後可能波動的附加金額，最少為零。所以市值為負的對沖，佔用的額度少於它的附加金額。現階段按未淨額計：逐筆計算，各筆之間不做淨額，也不計抵押品。掉期以遠端計算。一筆對沖計入到期所在的期限檔，以及所有更短的期限檔。原因是每一檔限制的是到那時仍未到期的風險：O/N 檔包含所有對沖，3M 檔只包含過了 1M 檔仍未到期的對沖。各檔顯示的是同一個金額，是同一份風險分別對照幾條額度，不是加起來。期限越長風險越大，所以額度通常隨期限遞減。',
         calcs: [
           '3M 掉期：計入 O/N、1W、1M、3M；不計入 6M、1Y',
-          '風險敞口 = max(市值, 0) + 名義本金 × 附加因子 %',
-          '有終止淨額結算：max(Σ 市值, 0) + (0.4 + 0.6 × NGR) × Σ 附加金額',
+          '一筆對沖的風險敞口 = max(市值 + 名義本金 × 附加因子 %, 0)',
+          '某期限檔的交割前風險 = Σ 計入該檔的各筆風險敞口',
+          '某集團開啟了終止淨額結算時：max(Σ 市值 + (0.4 + 0.6 × NGR) × Σ 附加金額, 0)',
           'NGR = max(Σ 市值, 0) ÷ Σ max(市值, 0)',
         ],
       },
       {
         title: '結算風險',
-        text: '交收日我方應收的金額：若我方已付而對手未付，就是損失。經 CLS 交收和 NDF 為零。當日交收的款項一律計全額。',
+        text: '交收日我方應收的金額：若我方已付而對手未付，就是損失。有些款項豁免，計為零：經 CLS 或其他同步交收安排交收的款項，以及只付一筆差額的 NDF。與內部交易對手的交易和交易所期貨也豁免；本程式不會送出這兩類交易。當日交收的款項一律計全額。',
         calcs: ['某日風險敞口 = 當日應收金額，按即期折算為美元'],
       },
       {
+        title: '360T 名義金額總額',
+        text: '360T 多一條額度：每日與一個對手在 360T 成交的名義金額。每筆對沖按全額計，買賣相加，不互相抵銷；每日從零開始。',
+        calcs: ['今日名義金額總額 = Σ 今日在 360T 與該對手成交的每筆對沖的金額，按即期折算為美元'],
+      },
+      {
         title: '交易前檢查',
-        text: '每個期限檔和每個交收日都不超出額度，對沖才可送出。送出時預佔額度，直至 LP 成交或拒絕。LP 5 秒內沒有回覆，就向場地查詢；確認沒有成交才釋放。',
-        calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔 − 場地切片'],
+        text: '每個期限檔和每個交收日都不超出額度，在 360T 還要當日的名義金額不超出額度，對沖才可送出。送出時預佔額度，直至 LP 成交或拒絕。LP 5 秒內沒有回覆，就向場地查詢；確認沒有成交才釋放。額度用到 80% 會出現預警；要超出額度才攔截。',
+        calcs: ['可用額度 = 授信額度 − 往日交易 − 今日成交 − 預佔'],
       },
       {
         title: '事後披露的場地',
@@ -144,12 +158,12 @@ const T = {
     steps: '同一筆掉期，逐步計算',
     dealt: (d: string) => `成交當日：${d}`,
     later: (r: string) => `一週後，即期上升 1% 至 ${r}`,
-    laterText: (k: string, mv: string, a: string, c: string) =>
-      `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。負市值不能減少附加金額，因為到期前市值仍可能轉正：風險敞口就是附加金額 ${a}。若方向相反，市值為正，風險敞口是 ${c}。`,
+    laterText: (k: string, mv: string, a: string, e: string, c: string) =>
+      `遠端我方以 ${k} 賣出 EUR，現已低於市價，所以市值是 USD ${mv}。它從附加金額 ${a} 裡扣減：風險敞口 = max(${mv} + ${a}, 0) = ${e}。若方向相反，市值為正，風險敞口是 ${c}。`,
     bk: '事後披露的場地，逐步計算',
     bkIntro: (ch: string, n: number, size: string, tenor: string) => `${ch} 上有 ${n} 個對手可能成交。交易台掛一張 USD/TWD NDF，${tenor}，USD ${size}。`,
     bkSteps: ['掛單前：對每個對手檢查', '額度最緊的對手決定最大金額', '把訂單縮小到這個金額，然後掛單並預佔', '成交回報：一個轉為已用，其餘釋放'],
-    bkRisk: (size: string, pct: string, e: string) => `這張單要用的額度 = max(0, 0) + ${size} × ${pct}% = USD ${e}`,
+    bkRisk: (size: string, pct: string, e: string) => `這張單要用的額度 = max(0 + ${size} × ${pct}%, 0) = USD ${e}`,
     bkCheck: (g: string, p: string, line: string, before: string, room: string, e: string, ok: boolean) =>
       `${g}：${p} 額度 ${line} − 已用和預佔 ${before} = ${room}，${ok ? '放得下' : '放不下'} ${e}`,
     bkBlocked: (g: string) => `${g}放不下，所以整張單不能掛：交易台不能選誰來成交。`,
@@ -163,7 +177,9 @@ const T = {
     bkEnd: (full: string, g: string) => `全程沒有改過場地上的限額。要掛足 USD ${full}，就要由管理場地額度的人在場地上停用 ${g}。`,
     more: '假設、限制與資料來源',
     notes: [
-      '風險敞口先把市值以零為下限，再加附加金額，與巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊一致。部分內部額度系統容許負市值減少附加金額；「授信額度與附加因子」裡有設定可切換。',
+      '風險敞口 = max(市值 + 附加金額, 0)，逐筆計算。這是交易台所對接的額度系統的做法，已向風險管理負責人確認，所以負市值會減少附加金額。巴塞爾現行風險暴露法和美國 OCC 衍生工具手冊先把市值以零為下限，保留全部附加金額；「額度管理」裡有設定可切換到這個寫法。',
+      '現階段按未淨額計，不做淨額，也不計抵押品。每個銀行集團的兩個淨額結算開關留作日後使用，預設關閉。',
+      '需求把「360T 的 Gross Notional」列為第三個指標，但沒有寫定義。這裡取：每日與一個對手在 360T 成交的名義金額，每筆對沖按全額計一次，買賣相加，每日從零開始。這個理解是假設，仍待確認；預警線 80% 也是。',
       '淨額對總額比率（NGR）與附加金額的淨額計算：巴塞爾協定二，附件四。沒有任何正市值時 NGR 取 1，與美國掉期保證金規則對同一公式的處理相同。',
       '結算風險是我方應收的金額，只計在交割日當天。這是每日結算額度的行業慣例：2006 年 CPSS 調查中 52% 的機構這樣計。巴塞爾（2013）和金管局（TA-2）的定義是由我方付款不能撤回開始，計到確認收款為止。調查中這段時間平均 26 小時，所以只計一天可能低估。',
       'CLS 有 18 種合資格貨幣，不包括 CNH 和 TWD。指示須在交割日 00:00（歐洲中部時間）前提交，所以當日交收的款項一律計全額。另一邊仍可經 CLS。',
@@ -280,7 +296,7 @@ export function Formulae() {
       <Workings ctx={ex.ctx0} trade={ex.trade} risk={ex.check.risk} measured={ex.check.after} group={ex.check.group} isNew openFrom={1} />
       <h3>{t.later(rate('EURUSD', LATER_SPOT))}</h3>
       <p>
-        {t.laterText(rate('EURUSD', far.rate), signedAmt(ex.risk1.mv), amt(ex.risk1.exposure), amt(Math.max(-ex.risk1.mv, 0) + ex.risk1.addOn))}
+        {t.laterText(rate('EURUSD', far.rate), signedAmt(ex.risk1.mv), amt(ex.risk1.addOn), amt(ex.risk1.exposure), amt(Math.max(-ex.risk1.mv, 0) + ex.risk1.addOn))}
       </p>
       <Workings ctx={ex.ctx1} trade={ex.filled} risk={ex.risk1} measured={ex.measured1} group={ex.check.group} isNew={false} openFrom={4} />
 
